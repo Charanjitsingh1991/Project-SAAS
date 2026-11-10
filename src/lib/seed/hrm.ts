@@ -2,6 +2,7 @@ import "server-only";
 import { and, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { logActivity, type Ctx } from "@/lib/activity";
+import { packOf } from "@/lib/countries";
 import { addDaysYmd, todayYmd } from "@/lib/format";
 import { eachDate, isWeekend, monthRange, shiftMonth, workingDates } from "@/lib/hrm";
 import { createChecklist } from "@/lib/hrm-data";
@@ -46,6 +47,8 @@ export async function seedHrm(ctx: Ctx): Promise<void> {
   const prev = monthRange(prevMonth);
 
   const [owner] = ctx.userId ? await db.select().from(schema.users).where(eq(schema.users.id, ctx.userId)).limit(1) : [];
+  const [org] = await db.select().from(schema.organizations).where(eq(schema.organizations.id, orgId)).limit(1);
+  const pack = packOf(org ?? {});
 
   /* Leave types (created with the workspace; ensure they exist). */
   let types = await db.select().from(schema.leaveTypes).where(eq(schema.leaveTypes.orgId, orgId));
@@ -140,31 +143,16 @@ export async function seedHrm(ctx: Ctx): Promise<void> {
   }
 
   /* Holidays for the current year (and the previous month's year when it differs) */
-  const years = [...new Set([today.slice(0, 4), prev.start.slice(0, 4)])];
-  const MOVABLE: Record<string, [string, string, string]> = {
-    "2025": ["03-14", "10-02", "10-20"],
-    "2026": ["03-04", "10-20", "11-08"],
-  };
-  const holidayRows: { orgId: number; date: string; name: string; optional: boolean }[] = [];
-  for (const y of years) {
-    const [holi, dussehra, diwali] = MOVABLE[y] ?? ["03-14", "10-20", "11-01"];
-    const list: [string, string, boolean][] = [
-      ["01-01", "New Year's Day", true],
-      ["01-26", "Republic Day", false],
-      [holi, "Holi", false],
-      ["05-01", "Labour Day", false],
-      ["08-15", "Independence Day", false],
-      ["10-02", "Gandhi Jayanti", false],
-      [dussehra, "Dussehra", false],
-      [diwali, "Diwali", false],
-      ["12-25", "Christmas", false],
-    ];
-    for (const [md, name, optional] of list) {
-      const date = `${y}-${md}`;
-      if (!holidayRows.some((h) => h.date === date)) holidayRows.push({ orgId, date, name, optional });
-    }
+  // The calendar comes from the country pack (initOrgDefaults seeds this year and next); add the previous month's year in January.
+  const years = [...new Set([Number(today.slice(0, 4)), Number(prev.start.slice(0, 4))])];
+  const packHolidays = years.flatMap((y) => pack.hr.holidays(y));
+  if (packHolidays.length) {
+    await db
+      .insert(schema.holidays)
+      .values(packHolidays.map((h) => ({ orgId, date: h.date, name: h.name, optional: !!h.optional })))
+      .onConflictDoNothing();
   }
-  await db.insert(schema.holidays).values(holidayRows);
+  const holidayRows = await db.select().from(schema.holidays).where(eq(schema.holidays.orgId, orgId));
   const holidays = new Set(holidayRows.filter((h) => !h.optional).map((h) => h.date));
 
   /* Attendance: previous month in full + this month to date */
