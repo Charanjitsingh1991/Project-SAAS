@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { BarChart3, CreditCard, LayoutGrid, LogOut, ShieldCheck, UsersRound } from "lucide-react";
+import { BarChart3, CircleUserRound, CreditCard, LayoutGrid, LogOut, Settings2, ShieldCheck, UsersRound } from "lucide-react";
 import { logout } from "@/app/actions/auth";
 import { switchWorkspace } from "@/app/app/actions";
 import { Logo } from "@/components/logo";
@@ -22,9 +22,17 @@ function buildNav(ws: ActiveWorkspace): { main: NavItem[]; modules: NavItem[]; s
   if (canManage(ws.role)) {
     settings.push({ href: "/app/team", label: "Team & roles", icon: <UsersRound className="size-3.5" /> });
     settings.push({ href: "/app/billing", label: "Billing", icon: <CreditCard className="size-3.5" /> });
+    settings.push({ href: "/app/settings", label: "Settings", icon: <Settings2 className="size-3.5" /> });
   }
   if (ws.isPlatformAdmin) settings.push({ href: "/admin", label: "Platform admin", icon: <ShieldCheck className="size-3.5" />, color: "bg-lime" });
-  return { main: [{ href: "/app", label: "Overview", icon: <LayoutGrid className="size-3.5" /> }], modules, settings };
+  return {
+    main: [
+      { href: "/app", label: "Overview", icon: <LayoutGrid className="size-3.5" /> },
+      { href: "/app/me", label: "My space", icon: <CircleUserRound className="size-3.5" /> },
+    ],
+    modules,
+    settings,
+  };
 }
 
 function TrialChip({ ws }: { ws: ActiveWorkspace }) {
@@ -106,13 +114,13 @@ export async function Sidebar() {
   const active = ws as ActiveWorkspace;
   return (
     <>
-      <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-line bg-paper/90 px-4 backdrop-blur lg:hidden">
+      <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-line bg-paper/90 px-4 backdrop-blur lg:hidden print:hidden">
         <Logo />
         <MobileNav>
           <NavBody ws={active} />
         </MobileNav>
       </header>
-      <aside className="sticky top-0 hidden h-dvh w-[264px] shrink-0 flex-col overflow-y-auto border-r border-line bg-paper-2/40 px-4 py-5 lg:flex">
+      <aside className="sticky top-0 hidden h-dvh w-[264px] shrink-0 flex-col overflow-y-auto border-r border-line bg-paper-2/40 px-4 py-5 lg:flex print:hidden">
         <Logo className="mb-6 px-2" />
         <NavBody ws={active} />
       </aside>
