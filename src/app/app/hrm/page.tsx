@@ -52,7 +52,7 @@ export default async function HrmDirectoryPage({ searchParams }: { searchParams:
       <PageHeader
         title="People"
         description="Employee directory, lifecycle, leave and attendance in one place."
-        tabs={hrmTabs("directory")}
+        tabs={hrmTabs(ws, "directory")}
         actions={
           <>
             {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- file download, not a page */}

@@ -6,7 +6,7 @@ import { Card, PageHeader } from "@/components/app/ui";
 import { db, schema } from "@/db";
 import { todayYmd } from "@/lib/format";
 import { peekNumber } from "@/lib/sequence";
-import { requireWorkspace } from "@/lib/tenancy";
+import { packFor, requireWorkspace } from "@/lib/tenancy";
 import { createEmployee } from "../actions";
 import { CompFields, JobFields, PersonalFields, StatutoryFields } from "../_components/employee-fields";
 
@@ -25,6 +25,7 @@ export default async function NewEmployeePage() {
     peekNumber(orgId, "employee"),
   ]);
   const today = todayYmd();
+  const pack = packFor(ws);
 
   return (
     <>
@@ -39,7 +40,7 @@ export default async function NewEmployeePage() {
       />
       <ActionForm action={createEmployee} resetOnSuccess={false} className="space-y-6">
         <Card title="Personal">
-          <PersonalFields />
+          <PersonalFields pack={pack} />
         </Card>
         <Card title="Job">
           <JobFields
@@ -50,10 +51,10 @@ export default async function NewEmployeePage() {
 
         </Card>
         <Card title="Compensation">
-          <CompFields />
+          <CompFields pack={pack} />
         </Card>
-        <Card title="Statutory & bank">
-          <StatutoryFields />
+        <Card title={pack.code === "AE" ? "Identity, visa & bank" : "Statutory & bank"}>
+          <StatutoryFields pack={pack} />
         </Card>
         <p className="text-xs text-ink-mute">If the work email matches a workspace member, their login is linked automatically for My space.</p>
         <SubmitButton>Create employee</SubmitButton>
