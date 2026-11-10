@@ -11,7 +11,7 @@ import type { FormState } from "@/lib/definitions";
 import { formObject, toMinor } from "@/lib/format";
 import { invoiceProjectTime } from "@/lib/posting";
 import { nextNumber } from "@/lib/sequence";
-import { requireWorkspace, type ActiveWorkspace } from "@/lib/tenancy";
+import { planModules, requireWorkspace, type ActiveWorkspace } from "@/lib/tenancy";
 import { canManage } from "@/lib/roles";
 import { PROJECT_TONES } from "./tones";
 
@@ -457,6 +457,7 @@ export async function deleteTimeAction(fd: FormData) {
 
 export async function billTimeAction(_: FormState, fd: FormData): Promise<FormState> {
   const ws = await ws_();
+  if (!planModules(ws).includes("finance")) return { ok: false, message: "Turn on the Finance module to invoice project time." };
   const id = reqId.safeParse(fd.get("projectId"));
   if (!id.success) return { ok: false, message: "Project not found." };
   const project = await ownProject(ws, id.data);

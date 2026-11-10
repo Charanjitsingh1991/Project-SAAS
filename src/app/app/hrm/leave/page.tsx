@@ -6,6 +6,7 @@ import { Badge, Card, EmptyState, PageHeader, StatusBadge, Table, Td, Th, type T
 import { db, schema } from "@/db";
 import { addDaysYmd, formatDate, todayYmd } from "@/lib/format";
 import { LEAVE_COLORS, dayOfWeek, isValidYmd, isWeekend, monthRange, shiftMonth } from "@/lib/hrm";
+import { weekendOf } from "@/lib/countries";
 import { requireWorkspace } from "@/lib/tenancy";
 import { applyLeaveForEmployee, decideLeaveAction, saveLeaveType } from "../leave-actions";
 import { hrmTabs } from "../tabs";
@@ -42,7 +43,7 @@ export default async function LeavePage({ searchParams }: { searchParams: Promis
 
   return (
     <>
-      <PageHeader title="Leave" description="Requests, who's out, and leave types." tabs={hrmTabs("leave")} />
+      <PageHeader title="Leave" description="Requests, who's out, and leave types." tabs={hrmTabs(ws, "leave")} />
 
       {sp.error && <p role="alert" className="mb-4 rounded-xl bg-signal/10 px-4 py-3 text-sm text-signal">{sp.error}</p>}
 
@@ -125,7 +126,7 @@ export default async function LeavePage({ searchParams }: { searchParams: Promis
         )}
       </Card>
 
-      <WhosOut orgId={orgId} today={today} view={sp.view === "month" ? "month" : "week"} anchor={isValidYmd(sp.d) ? sp.d : today} />
+      <WhosOut orgId={orgId} weekend={weekendOf(ws.org)} today={today} view={sp.view === "month" ? "month" : "week"} anchor={isValidYmd(sp.d) ? sp.d : today} />
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
         <Card title="Apply on behalf of an employee" className="h-fit">
@@ -185,7 +186,7 @@ export default async function LeavePage({ searchParams }: { searchParams: Promis
   );
 }
 
-async function WhosOut({ orgId, today, view, anchor }: { orgId: number; today: string; view: "week" | "month"; anchor: string }) {
+async function WhosOut({ orgId, weekend, today, view, anchor }: { orgId: number; weekend: number[]; today: string; view: "week" | "month"; anchor: string }) {
   let start: string;
   let end: string;
   let prev: string;
@@ -246,7 +247,7 @@ async function WhosOut({ orgId, today, view, anchor }: { orgId: number; today: s
           ))}
           {cells.map((d, i) => {
             if (!d) return <span key={`b${i}`} />;
-            const off = isWeekend(d) || hmap.has(d);
+            const off = isWeekend(d, weekend) || hmap.has(d);
             const people = off ? [] : out.filter((o) => o.r.startDate <= d && o.r.endDate >= d);
             return (
               <div key={d} className={`min-h-20 rounded-xl border p-1.5 text-xs ${off ? "border-transparent bg-ink/5" : "border-line bg-card"} ${d === today ? "ring-2 ring-ink" : ""}`}>

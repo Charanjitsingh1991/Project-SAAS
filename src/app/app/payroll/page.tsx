@@ -37,7 +37,15 @@ export default async function PayrollPage() {
 
   return (
     <>
-      <PageHeader title="Payroll" description={pack.code === "AE" ? "Monthly runs with proration, LOP, GPSSA, gratuity accrual and WPS salary files — draft, approve, then pay." : "Monthly runs with proration, LOP, PF, ESI, professional tax and TDS — draft, approve, then pay."} />
+      <PageHeader
+        title="Payroll"
+        description={pack.code === "AE" ? "Monthly runs with proration, LOP, GPSSA, gratuity accrual and WPS salary files — draft, approve, then pay." : "Monthly runs with proration, LOP, PF, ESI, professional tax and TDS — draft, approve, then pay."}
+        tabs={[
+          { href: "/app/payroll", label: "Runs", active: true },
+          { href: "/app/payroll/loans", label: "Loans & advances" },
+          { href: "/app/payroll/settlements", label: "Final settlements" },
+        ]}
+      />
 
       <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Stat label="Monthly payroll cost" value={formatMoney(monthlyCost, cur)} hint={pack.code === "AE" ? "Sum of active packages ÷ 12" : "Sum of active CTC ÷ 12"} tone="mint" />

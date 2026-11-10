@@ -10,7 +10,8 @@ import { ctxOf, logActivity } from "@/lib/activity";
 import type { FormState } from "@/lib/definitions";
 import { formObject, toMinor } from "@/lib/format";
 import { onDealWon } from "@/lib/posting";
-import { requireWorkspace } from "@/lib/tenancy";
+import { packFor, requireWorkspace } from "@/lib/tenancy";
+import { normalizeTaxId, taxIdError } from "./_components/tax-id";
 
 const ymd = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Pick a valid date.");
 const optId = z.coerce.number().int().positive().optional();
@@ -280,12 +281,8 @@ const CompanySchema = z.object({
   industry: z.string().trim().max(80).optional(),
   website: z.string().trim().max(200).optional(),
   phone: z.string().trim().max(40).optional(),
-  gstin: z
-    .string()
-    .trim()
-    .toUpperCase()
-    .regex(/^\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]Z[A-Z\d]$/, "Invalid GSTIN.")
-    .optional(),
+  // Tax ID (GSTIN / TRN) is validated per workspace country in companyInput().
+  gstin: z.string().max(40).transform(normalizeTaxId).optional(),
   billingAddress: z.string().trim().max(400).optional(),
   city: z.string().trim().max(80).optional(),
   state: z.string().trim().max(80).optional(),
@@ -293,15 +290,25 @@ const CompanySchema = z.object({
   ownerId: optId,
 });
 
+/** Parse a company form and check its tax ID against the workspace country pack. */
+function companyInput(ws: Ws, fd: FormData) {
+  const parsed = CompanySchema.safeParse(formObject(fd));
+  if (!parsed.success) return { error: fail(parsed.error) };
+  const pack = packFor(ws);
+  const err = taxIdError(pack, parsed.data.gstin, parsed.data.country);
+  if (err) return { error: { errors: { gstin: [err] }, message: "Please fix the highlighted fields." } as FormState };
+  return { data: parsed.data, pack };
+}
+
 export async function createCompany(_: FormState, fd: FormData): Promise<FormState> {
   const ws = await requireWorkspace({ module: "crm" });
-  const parsed = CompanySchema.safeParse(formObject(fd));
-  if (!parsed.success) return fail(parsed.error);
+  const parsed = companyInput(ws, fd);
+  if (!parsed.data) return parsed.error;
   const bad = await checkRefs(ws, parsed.data);
   if (bad) return { errors: bad };
   const [row] = await db
     .insert(schema.companies)
-    .values({ ...parsed.data, orgId: ws.org.id, ownerId: parsed.data.ownerId ?? ws.user.id, country: parsed.data.country ?? "India" })
+    .values({ ...parsed.data, orgId: ws.org.id, ownerId: parsed.data.ownerId ?? ws.user.id, country: parsed.data.country ?? parsed.pack.name })
     .returning({ id: schema.companies.id });
   await logActivity(ctxOf(ws), { module: "crm", entityType: "company", entityId: row.id, action: "created", summary: `Added company ${parsed.data.name}` });
   refresh();
@@ -312,8 +319,8 @@ export async function updateCompany(_: FormState, fd: FormData): Promise<FormSta
   const ws = await requireWorkspace({ module: "crm" });
   const raw = formObject(fd);
   const id = Number(raw.id);
-  const parsed = CompanySchema.safeParse(raw);
-  if (!parsed.success) return fail(parsed.error);
+  const parsed = companyInput(ws, fd);
+  if (!parsed.data) return parsed.error;
   const bad = await checkRefs(ws, parsed.data);
   if (bad) return { errors: bad };
   const d = parsed.data;

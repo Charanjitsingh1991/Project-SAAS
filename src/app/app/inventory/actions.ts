@@ -12,10 +12,13 @@ import { formObject, todayYmd, toMinor } from "@/lib/format";
 import { computePoTotals, isLowStock, suggestedQty } from "@/lib/inventory";
 import { getProductsWithStock } from "@/lib/inventory-data";
 import { taxOf } from "@/lib/money";
-import { receivePurchaseOrder } from "@/lib/posting";
+import { completeStockCount, receivePurchaseOrder } from "@/lib/posting";
 import { nextNumber } from "@/lib/sequence";
 import { defaultWarehouseId, moveStock } from "@/lib/stock";
-import { requireWorkspace } from "@/lib/tenancy";
+import { defaultTaxRate } from "@/lib/countries";
+import { packFor, planOf, requireWorkspace } from "@/lib/tenancy";
+import { normalizeTaxId, taxIdError } from "@/app/app/crm/_components/tax-id";
+import { parseCounted } from "./stock-counts/utils";
 
 type Ws = Awaited<ReturnType<typeof requireWorkspace>>;
 
@@ -40,6 +43,9 @@ async function loadProduct(orgId: number, id: number) {
   const [r] = await db.select().from(schema.products).where(and(eq(schema.products.id, id), eq(schema.products.orgId, orgId))).limit(1);
   return r;
 }
+function allowedRate(ws: Ws, rate: number) {
+  return packFor(ws).tax.rates.some((r) => r.rate === rate);
+}
 async function stockIn(productId: number, warehouseId: number) {
   const [r] = await db
     .select({ q: schema.stockLevels.quantity })
@@ -59,7 +65,7 @@ const ProductSchema = z.object({
   unit: z.enum(UNITS),
   costPrice: z.string().optional(),
   sellingPrice: z.string().optional(),
-  taxRate: z.coerce.number().min(0).max(100).default(18),
+  taxRate: z.coerce.number().min(0).max(100).optional(),
   reorderLevel: z.coerce.number().min(0).default(0),
   reorderQty: z.coerce.number().min(0).default(0),
   preferredVendorId: optId,
@@ -90,6 +96,8 @@ export async function createProduct(_: FormState, formData: FormData): Promise<F
   if (await skuTaken(orgId, d.sku)) errors.sku = ["This SKU already exists."];
   if (d.preferredVendorId && !(await ownsVendor(orgId, d.preferredVendorId))) errors.preferredVendorId = ["Choose a valid vendor."];
   if (d.openingWarehouseId && !(await ownsWarehouse(orgId, d.openingWarehouseId))) errors.openingWarehouseId = ["Choose a valid warehouse."];
+  const taxRate = d.taxRate ?? defaultTaxRate(packFor(ws));
+  if (!allowedRate(ws, taxRate)) errors.taxRate = [`Pick a valid ${packFor(ws).tax.name} rate.`];
   if (Object.keys(errors).length) return { errors, message: "Please fix the highlighted fields." };
 
   const [p] = await db
@@ -103,7 +111,7 @@ export async function createProduct(_: FormState, formData: FormData): Promise<F
       unit: d.unit,
       costPrice: cost,
       sellingPrice: price,
-      taxRate: d.taxRate,
+      taxRate,
       reorderLevel: d.reorderLevel,
       reorderQty: d.reorderQty,
       preferredVendorId: d.preferredVendorId ?? null,
@@ -150,6 +158,9 @@ export async function updateProduct(_: FormState, formData: FormData): Promise<F
     cost = toMinor(d.costPrice);
     if (Number.isNaN(cost) || cost < 0) errors.costPrice = ["Enter a valid cost."];
   }
+  const taxRate = d.taxRate ?? product.taxRate;
+  // Keep a legacy rate the product already has; otherwise it must be one of the country's rates.
+  if (taxRate !== product.taxRate && !allowedRate(ws, taxRate)) errors.taxRate = [`Pick a valid ${packFor(ws).tax.name} rate.`];
   if (Object.keys(errors).length) return { errors, message: "Please fix the highlighted fields." };
 
   await db
@@ -162,7 +173,7 @@ export async function updateProduct(_: FormState, formData: FormData): Promise<F
       unit: d.unit,
       costPrice: cost,
       sellingPrice: price,
-      taxRate: d.taxRate,
+      taxRate,
       reorderLevel: d.reorderLevel,
       reorderQty: d.reorderQty,
       preferredVendorId: d.preferredVendorId ?? null,
@@ -263,9 +274,13 @@ export async function createWarehouse(_: FormState, formData: FormData): Promise
   if (!parsed.success) return fail(parsed.error);
   const d = parsed.data;
   const orgId = ws.org.id;
+  const [{ n }] = await db.select({ n: sql<number>`count(*)` }).from(schema.warehouses).where(eq(schema.warehouses.orgId, orgId));
+  const plan = planOf(ws);
+  if (plan.maxWarehouses !== null && Number(n) >= plan.maxWarehouses) {
+    return { message: `Your ${plan.name} plan includes ${plan.maxWarehouses} warehouse${plan.maxWarehouses === 1 ? "" : "s"}. Upgrade your plan to add more locations.` };
+  }
   if (await codeTaken(orgId, d.code)) return { errors: { code: ["This code is already used."] }, message: "Please fix the highlighted fields." };
 
-  const [{ n }] = await db.select({ n: sql<number>`count(*)` }).from(schema.warehouses).where(eq(schema.warehouses.orgId, orgId));
   const [w] = await db.insert(schema.warehouses).values({ orgId, name: d.name, code: d.code, address: d.address ?? null, isDefault: false }).returning({ id: schema.warehouses.id });
   if (bool(raw.isDefault) || Number(n) === 0) await makeDefault(orgId, w.id);
   await logActivity(ctxOf(ws), { module: "inventory", entityType: "warehouse", entityId: w.id, action: "created", summary: `Added warehouse ${d.name}` });
@@ -320,19 +335,23 @@ const VendorSchema = z.object({
   name: z.string().trim().min(1, "Name is required.").max(160),
   email: z.union([z.literal(""), z.email("Enter a valid email.")]).optional(),
   phone: z.string().trim().max(40).optional(),
-  gstin: z
-    .string()
-    .trim()
-    .toUpperCase()
-    .regex(/^[0-9A-Z]{15}$/, "GSTIN must be 15 characters.")
-    .optional(),
+  // GSTIN / TRN, checked against the workspace country pattern in vendorInput().
+  gstin: z.string().max(40).transform(normalizeTaxId).optional(),
   address: z.string().trim().max(300).optional(),
 });
 
+function vendorInput(ws: Ws, raw: Record<string, string | undefined>) {
+  const parsed = VendorSchema.safeParse(raw);
+  if (!parsed.success) return { error: fail(parsed.error) };
+  const err = taxIdError(packFor(ws), parsed.data.gstin);
+  if (err) return { error: { errors: { gstin: [err] }, message: "Please fix the highlighted fields." } as FormState };
+  return { data: parsed.data };
+}
+
 export async function createVendor(_: FormState, formData: FormData): Promise<FormState> {
   const ws = await requireWorkspace({ module: "inventory" });
-  const parsed = VendorSchema.safeParse(formObject(formData));
-  if (!parsed.success) return fail(parsed.error);
+  const parsed = vendorInput(ws, formObject(formData));
+  if (!parsed.data) return parsed.error;
   const d = parsed.data;
   const [v] = await db
     .insert(schema.vendors)
@@ -348,8 +367,8 @@ export async function updateVendor(_: FormState, formData: FormData): Promise<Fo
   const raw = formObject(formData);
   const id = Number(raw.id);
   if (!(await ownsVendor(ws.org.id, id))) return { message: "Vendor not found." };
-  const parsed = VendorSchema.safeParse(raw);
-  if (!parsed.success) return fail(parsed.error);
+  const parsed = vendorInput(ws, raw);
+  if (!parsed.data) return parsed.error;
   const d = parsed.data;
   await db
     .update(schema.vendors)
@@ -387,7 +406,7 @@ const LineSchema = z.object({
   productId: z.number("Select a product on every line.").int().positive("Select a product on every line."),
   quantity: z.number("Enter a quantity on every line.").positive("Quantity must be above zero."),
   unitCost: z.number("Enter a unit cost on every line.").min(0, "Unit cost can't be negative."),
-  taxRate: z.number("Pick a GST rate.").min(0).max(100),
+  taxRate: z.number("Pick a tax rate.").min(0).max(100),
 });
 
 /** Validate form + lines and resolve org-owned refs. Returns either errors or the computed PO. */
@@ -568,4 +587,107 @@ export async function createDraftPoFromReorder(formData: FormData) {
   );
   await logActivity(ctxOf(ws), { module: "inventory", entityType: "purchase_order", entityId: po.id, action: "created", summary: `Created draft ${number} from the reorder planner` });
   redirect(poUrl(po.id));
+}
+
+/* ───────────── Stock counts ───────────── */
+
+const countUrl = (id: number, qs = "") => `${BASE}/stock-counts/${id}${qs}`;
+
+/** SC-0001 numbering on the shared per-workspace sequences table. */
+async function nextCountNumber(orgId: number) {
+  const [row] = await db
+    .insert(schema.sequences)
+    .values({ orgId, key: "stock_count", next: 2 })
+    .onConflictDoUpdate({ target: [schema.sequences.orgId, schema.sequences.key], set: { next: sql`${schema.sequences.next} + 1` } })
+    .returning({ next: schema.sequences.next });
+  return `SC-${String(row.next - 1).padStart(4, "0")}`;
+}
+
+async function loadCount(orgId: number, id: number) {
+  if (!Number.isInteger(id)) return undefined;
+  const [c] = await db.select().from(schema.stockCounts).where(and(eq(schema.stockCounts.id, id), eq(schema.stockCounts.orgId, orgId))).limit(1);
+  return c;
+}
+
+/** Start a count: snapshot the warehouse's current quantity for every active, stock-tracked product. */
+export async function createStockCount(_: FormState, formData: FormData): Promise<FormState> {
+  const ws = await requireWorkspace({ module: "inventory" });
+  const parsed = z
+    .object({ warehouseId: z.coerce.number("Choose a warehouse.").int().positive("Choose a warehouse."), note: z.string().trim().max(300).optional(), category: z.string().trim().max(60).optional() })
+    .safeParse(formObject(formData));
+  if (!parsed.success) return fail(parsed.error);
+  const d = parsed.data;
+  const orgId = ws.org.id;
+  if (!(await ownsWarehouse(orgId, d.warehouseId))) return { errors: { warehouseId: ["Choose a valid warehouse."] }, message: "Please fix the highlighted fields." };
+  const [open] = await db
+    .select({ number: schema.stockCounts.number })
+    .from(schema.stockCounts)
+    .where(and(eq(schema.stockCounts.orgId, orgId), eq(schema.stockCounts.warehouseId, d.warehouseId), eq(schema.stockCounts.status, "in_progress")))
+    .limit(1);
+  if (open) return { errors: { warehouseId: [`${open.number} is already in progress for this warehouse.`] }, message: "Finish or cancel the open count first." };
+
+  const conds = [eq(schema.products.orgId, orgId), eq(schema.products.active, true), eq(schema.products.trackStock, true)];
+  if (d.category) conds.push(eq(schema.products.category, d.category));
+  const products = await db
+    .select({ id: schema.products.id, qty: schema.stockLevels.quantity })
+    .from(schema.products)
+    .leftJoin(schema.stockLevels, and(eq(schema.stockLevels.productId, schema.products.id), eq(schema.stockLevels.warehouseId, d.warehouseId)))
+    .where(and(...conds));
+  if (!products.length) return { message: d.category ? "No active, stock-tracked products in that category." : "Add stock-tracked products before counting." };
+
+  const number = await nextCountNumber(orgId);
+  const [sc] = await db
+    .insert(schema.stockCounts)
+    .values({ orgId, number, warehouseId: d.warehouseId, status: "in_progress", note: [d.category ? `Category: ${d.category}` : null, d.note].filter(Boolean).join(" · ") || null })
+    .returning({ id: schema.stockCounts.id });
+  await db.insert(schema.stockCountLines).values(products.map((p) => ({ orgId, countId: sc.id, productId: p.id, expectedQty: p.qty ?? 0, countedQty: null })));
+  await logActivity(ctxOf(ws), { module: "inventory", entityType: "stock_count", entityId: sc.id, action: "created", summary: `Started stock count ${number} (${products.length} products)` });
+  redirect(countUrl(sc.id));
+}
+
+/** Save counted quantities (`c_<lineId>`; blank = not counted); `intent=complete` then posts adjustments. */
+export async function saveStockCount(_: FormState, formData: FormData): Promise<FormState> {
+  const ws = await requireWorkspace({ module: "inventory" });
+  const sc = await loadCount(ws.org.id, Number(formData.get("id")));
+  if (!sc) return { message: "Stock count not found." };
+  if (sc.status !== "in_progress") return { message: "This count is already closed." };
+
+  const lines = await db
+    .select({ id: schema.stockCountLines.id, countedQty: schema.stockCountLines.countedQty })
+    .from(schema.stockCountLines)
+    .where(and(eq(schema.stockCountLines.countId, sc.id), eq(schema.stockCountLines.orgId, ws.org.id)));
+  const errors: Record<string, string[]> = {};
+  const updates: { id: number; qty: number | null }[] = [];
+  for (const l of lines) {
+    const key = `c_${l.id}`;
+    if (!formData.has(key)) continue;
+    const v = parseCounted(formData.get(key) as string | null);
+    if (v === "invalid") errors[key] = ["Enter 0 or more."];
+    else if (v !== l.countedQty) updates.push({ id: l.id, qty: v });
+  }
+  if (Object.keys(errors).length) return { errors, message: "Counted quantities must be numbers ≥ 0." };
+  for (const u of updates) await db.update(schema.stockCountLines).set({ countedQty: u.qty }).where(and(eq(schema.stockCountLines.id, u.id), eq(schema.stockCountLines.orgId, ws.org.id)));
+
+  if (formData.get("intent") === "complete") {
+    const [{ n }] = await db
+      .select({ n: sql<number>`count(*)` })
+      .from(schema.stockCountLines)
+      .where(and(eq(schema.stockCountLines.countId, sc.id), sql`${schema.stockCountLines.countedQty} is not null`));
+    if (!Number(n)) return { message: "Enter at least one counted quantity before completing." };
+    const err = await completeStockCount(ctxOf(ws), sc.id);
+    if (err) return { message: err };
+    redirect(countUrl(sc.id, "?completed=1"));
+  }
+  refresh();
+  return { ok: true, message: updates.length ? `Saved ${updates.length} count${updates.length === 1 ? "" : "s"}.` : "No changes." };
+}
+
+export async function cancelStockCount(formData: FormData) {
+  const ws = await requireWorkspace({ module: "inventory" });
+  const sc = await loadCount(ws.org.id, Number(formData.get("id")));
+  if (!sc) redirect(`${BASE}/stock-counts`);
+  if (sc.status !== "in_progress") redirect(countUrl(sc.id, `?error=${encodeURIComponent("Only counts in progress can be cancelled.")}`));
+  await db.update(schema.stockCounts).set({ status: "cancelled" }).where(and(eq(schema.stockCounts.id, sc.id), eq(schema.stockCounts.orgId, ws.org.id)));
+  await logActivity(ctxOf(ws), { module: "inventory", entityType: "stock_count", entityId: sc.id, action: "cancelled", summary: `Cancelled stock count ${sc.number}` });
+  refresh();
 }
