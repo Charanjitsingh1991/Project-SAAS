@@ -8,11 +8,12 @@ import { db, schema } from "@/db";
 import { ctxOf, logActivity } from "@/lib/activity";
 import type { FormState } from "@/lib/definitions";
 import { addDaysYmd, formObject, todayYmd } from "@/lib/format";
-import { isValidYmd } from "@/lib/hrm";
+import type { CountryPack } from "@/lib/countries";
+import { UAE_COMPONENT_KEYS, isValidYmd, packageFromComponents, parseEmployeeFields } from "@/lib/hrm";
 import { createChecklist } from "@/lib/hrm-data";
 import { toMinor } from "@/lib/money";
 import { nextNumber } from "@/lib/sequence";
-import { requireWorkspace } from "@/lib/tenancy";
+import { packFor, requireWorkspace } from "@/lib/tenancy";
 
 const Ymd = z.string().refine(isValidYmd, "Enter a valid date.");
 const Id = z.string().regex(/^\d+$/, "Invalid selection.");
@@ -35,28 +36,41 @@ const Job = {
   joinDate: Ymd,
   probationEndDate: Ymd.optional(),
 };
-const Comp = {
-  annualCtc: z.string().optional(),
-  pfEnrolled: z.string().optional(),
-  metro: z.string().optional(),
-};
-const Statutory = {
-  pan: z.string().trim().toUpperCase().regex(/^[A-Z]{5}\d{4}[A-Z]$/, "PAN looks like ABCDE1234F.").optional(),
-  uan: z.string().regex(/^\d{12}$/, "UAN is 12 digits.").optional(),
-  bankAccount: z.string().regex(/^\d{9,18}$/, "Account number is 9–18 digits.").optional(),
-  ifsc: z.string().trim().toUpperCase().regex(/^[A-Z]{4}0[A-Z0-9]{6}$/, "IFSC looks like HDFC0001234.").optional(),
-};
-
 const SECTIONS = {
   personal: z.object(Personal),
   job: z.object(Job),
-  compensation: z.object({ ...Comp, ...Statutory }),
+  // Validated by compensationOf() against the workspace's country pack.
+  compensation: z.object({}),
 } as const;
 
 function ctcOf(raw: string | undefined): { value: number } | { error: string } {
   const v = toMinor(raw);
   if (!Number.isFinite(v) || v < 0 || v > 1e13) return { error: "Enter a valid annual CTC." };
   return { value: v };
+}
+
+/** Pay + country identity/bank fields. India: annual CTC, PF, metro. UAE: monthly components → JSON, package = total × 12. */
+function compensationOf(pack: CountryPack, raw: Record<string, string | undefined>) {
+  const errors: Record<string, string[]> = {};
+  let pay: { annualCtc: number; salaryComponents?: string | null; pfEnrolled?: boolean; metro?: boolean } = { annualCtc: 0 };
+  if (pack.code === "AE") {
+    const c = { basic: 0, housing: 0, transport: 0, other: 0 };
+    for (const k of UAE_COMPONENT_KEYS) {
+      const v = toMinor(raw[`comp_${k}`]);
+      if (!Number.isFinite(v) || v < 0 || v > 1e11) errors[`comp_${k}`] = ["Enter a valid monthly amount."];
+      else c[k] = v;
+    }
+    if (!errors.comp_basic && raw.comp_basic === undefined && Object.values(c).some((v) => v > 0)) errors.comp_basic = ["Enter the basic salary."];
+    const p = packageFromComponents(c);
+    pay = { annualCtc: p.annual, salaryComponents: p.json };
+  } else {
+    const ctc = ctcOf(raw.annualCtc);
+    if ("error" in ctc) errors.annualCtc = [ctc.error];
+    else pay = { annualCtc: ctc.value, pfEnrolled: raw.pfEnrolled === "on", metro: raw.metro === "on" };
+  }
+  const fields = parseEmployeeFields(pack.hr.employeeFields, raw);
+  Object.assign(errors, fields.errors);
+  return Object.keys(errors).length ? ({ errors } as const) : ({ set: { ...pay, ...fields.values } } as const);
 }
 
 /** Validates department/manager belong to this org, and the manager link can't form a loop. */
@@ -113,11 +127,13 @@ async function memberUserByEmail(orgId: number, email: string, excludeEmployeeId
 export async function createEmployee(_: FormState, fd: FormData): Promise<FormState> {
   const ws = await requireWorkspace({ module: "hrm" });
   const orgId = ws.org.id;
-  const parsed = z.object({ ...Personal, ...Job, ...Comp, ...Statutory }).safeParse(formObject(fd));
-  if (!parsed.success) return { errors: z.flattenError(parsed.error).fieldErrors };
+  const raw = formObject(fd);
+  const parsed = z.object({ ...Personal, ...Job }).safeParse(raw);
+  const comp = compensationOf(packFor(ws), raw);
+  if (!parsed.success || "errors" in comp) {
+    return { errors: { ...(parsed.success ? {} : z.flattenError(parsed.error).fieldErrors), ...("errors" in comp ? comp.errors : {}) } };
+  }
   const v = parsed.data;
-  const ctc = ctcOf(v.annualCtc);
-  if ("error" in ctc) return { errors: { annualCtc: [ctc.error] } };
   if (v.probationEndDate && v.probationEndDate < v.joinDate) return { errors: { probationEndDate: ["Probation can't end before the join date."] } };
   const refs = await refErrors(orgId, v);
   if (Object.keys(refs).length) return { errors: refs };
@@ -143,13 +159,10 @@ export async function createEmployee(_: FormState, fd: FormData): Promise<FormSt
       workLocation: v.workLocation ?? null,
       joinDate: v.joinDate,
       probationEndDate: v.probationEndDate ?? null,
-      annualCtc: ctc.value,
-      pfEnrolled: v.pfEnrolled === "on",
-      metro: v.metro === "on",
-      pan: v.pan ?? null,
-      uan: v.uan ?? null,
-      bankAccount: v.bankAccount ?? null,
-      ifsc: v.ifsc ?? null,
+      // India PF / metro HRA don't apply outside India.
+      pfEnrolled: false,
+      metro: false,
+      ...comp.set,
     })
     .returning({ id: schema.employees.id });
   await createChecklist(orgId, row.id, "onboarding", v.joinDate);
@@ -193,19 +206,11 @@ export async function updateEmployee(_: FormState, fd: FormData): Promise<FormSt
       })
       .where(and(eq(schema.employees.id, id), eq(schema.employees.orgId, orgId)));
   } else {
-    const ctc = ctcOf(v.annualCtc);
-    if ("error" in ctc) return { errors: { annualCtc: [ctc.error] } };
+    const comp = compensationOf(packFor(ws), raw);
+    if ("errors" in comp) return { errors: comp.errors };
     await db
       .update(schema.employees)
-      .set({
-        annualCtc: ctc.value,
-        pfEnrolled: v.pfEnrolled === "on",
-        metro: v.metro === "on",
-        pan: v.pan ?? null,
-        uan: v.uan ?? null,
-        bankAccount: v.bankAccount ?? null,
-        ifsc: v.ifsc ?? null,
-      })
+      .set(comp.set)
       .where(and(eq(schema.employees.id, id), eq(schema.employees.orgId, orgId)));
   }
   await logActivity(ctxOf(ws), { module: "hrm", entityType: "employee", entityId: id, action: "updated", summary: `Updated ${section} details for ${emp.name} (${emp.code})` });

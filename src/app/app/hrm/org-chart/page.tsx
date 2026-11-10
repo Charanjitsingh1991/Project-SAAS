@@ -51,7 +51,7 @@ export default async function OrgChartPage() {
 
   return (
     <>
-      <PageHeader title="Org chart" description="Reporting lines built from each employee's manager. Click a card to open the profile." tabs={hrmTabs("org-chart")} />
+      <PageHeader title="Org chart" description="Reporting lines built from each employee's manager. Click a card to open the profile." tabs={hrmTabs(ws, "org-chart")} />
       <Card>
         {tree.length === 0 ? (
           <EmptyState title="Nothing to draw yet">Add employees and set who they report to.</EmptyState>
