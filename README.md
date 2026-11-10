@@ -46,20 +46,25 @@ Owners and admins invite people from **Team & roles** (`/app/team`). Each invite
 Plans: **Starter** includes HRM, CRM and Projects. **Growth** includes everything. Trials get everything. The configuration is in `src/lib/roles.ts`.
 
 ### Modules (`/app/*`)
-All data is scoped per workspace (`org_id`).
+The full functional blueprint for every module is in **[`docs/MODULES.md`](docs/MODULES.md)** and the engineering conventions in **[`docs/ENGINEERING.md`](docs/ENGINEERING.md)**.
 
-| Module | What it does |
-| --- | --- |
-| HRM | Employees and leave approvals |
-| CRM | Deal pipeline board and contacts |
-| Finance | Invoices (overdue tracking) and expenses by category |
-| Inventory | Products, stock adjustments, low-stock alerts and movement log |
-| Payroll | Monthly runs from active salaries with PF, PT and TDS deductions; payslips; mark paid |
-| Projects | Projects with a task board |
-| Helpdesk | Tickets with priority and status |
-| Analytics | Cash in vs. out, pipeline, headcount and tickets |
+- **HRM** — employee profiles, departments, org chart, leave with balances and approvals, attendance register, holidays, onboarding/offboarding, and **My space** self-service for every employee.
+- **Payroll** — monthly runs from CTC with loss-of-pay, PF, ESI, PT and TDS (new regime), draft → approved → paid, printable payslips, statutory summary and bank-transfer CSV.
+- **CRM** — companies (360° view), contacts, drag-and-drop pipeline, activities and follow-ups, forecast and lead scoring.
+- **Finance** — GST invoices with line items (CGST/SGST vs IGST), payments, expenses and vendor bills, a double-entry ledger, P&L, balance sheet, trial balance, AR aging, GST summary and manual journals.
+- **Inventory** — multi-warehouse stock, weighted-average costing, transfers and adjustments, purchase orders, a reorder planner and stock-out forecast.
+- **Projects** — boards, list, Gantt timeline, milestones, timesheets, profitability, and billing hours to invoices.
+- **Helpdesk** — tickets with SLA timers, internal notes, canned replies, knowledge base, and a public customer portal at `/support/<workspace>` with CSAT.
+- **Analytics** — cross-module dashboard plus a rule-based insights feed.
 
-New workspaces can click **Load sample data** on the overview to try every module.
+**Built-in automations** (toggle under Settings):
+- won deal → draft invoice + project
+- invoice sent → ledger + stock issue
+- PO received → stock + vendor bill
+- payroll paid → salary journal
+- approved leave → attendance → loss-of-pay
+
+Press **⌘K** anywhere to search every module. New workspaces can click **Load sample data** to get a fully connected demo company.
 
 ### Platform admin (`/admin`)
 Only for emails listed in `ADMIN_EMAILS`:

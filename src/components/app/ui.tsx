@@ -118,11 +118,35 @@ export const STATUS_TONE: Record<string, Tone> = {
   urgent: "rose",
   new: "butter",
   contacted: "sky",
-  closed: "mint",
+  closed: "card",
+  notice: "butter",
+  exited: "card",
+  probation: "lilac",
+  negotiation: "peach",
+  partial: "butter",
+  unpaid: "peach",
+  ordered: "sky",
+  received: "mint",
+  cancelled: "card",
+  backlog: "card",
+  in_progress: "sky",
+  review: "lilac",
+  absent: "rose",
+  present: "mint",
+  half_day: "butter",
+  leave: "sky",
+  holiday: "lilac",
+  wfh: "lime",
+  customer: "mint",
+  prospect: "sky",
+  churned: "rose",
+  breached: "rose",
+  at_risk: "butter",
+  on_track: "mint",
 };
 
 export function StatusBadge({ value }: { value: string }) {
-  return <Badge tone={STATUS_TONE[value] ?? "card"}>{value.replace("_", " ")}</Badge>;
+  return <Badge tone={STATUS_TONE[value] ?? "card"}>{value.replaceAll("_", " ")}</Badge>;
 }
 
 export function EmptyState({ title, children }: { title: string; children?: React.ReactNode }) {
@@ -135,10 +159,10 @@ export function EmptyState({ title, children }: { title: string; children?: Reac
 }
 
 /** Table primitives with consistent styling. */
-export function Table({ children }: { children: React.ReactNode }) {
+export function Table({ children, compact = false }: { children: React.ReactNode; compact?: boolean }) {
   return (
     <div className="-mx-5 -my-5 overflow-x-auto">
-      <table className="w-full min-w-[640px] text-left text-sm">{children}</table>
+      <table className={cn("w-full text-left text-sm", !compact && "min-w-[640px]")}>{children}</table>
     </div>
   );
 }
