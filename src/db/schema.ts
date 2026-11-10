@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { blob, index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 /*
  * Conventions:
@@ -965,7 +965,7 @@ export const kbArticles = sqliteTable(
 );
 
 
-/* ═════════════ HRM: documents, assets, recruitment, performance, claims ═════════════ */
+/* ═════════════ HRM: documents, recruitment, performance, claims ═════════════ */
 
 export const DOCUMENT_TYPES = ["passport", "visa", "emirates_id", "labour_card", "pan", "aadhaar", "driving_licence", "contract", "certificate", "other"] as const;
 
@@ -985,28 +985,6 @@ export const employeeDocuments = sqliteTable(
     createdAt: createdAt(),
   },
   (t) => [index("emp_docs_emp").on(t.employeeId), index("emp_docs_expiry").on(t.orgId, t.expiryDate)],
-);
-
-export const ASSET_STATUSES = ["available", "assigned", "repair", "retired"] as const;
-
-export const assets = sqliteTable(
-  "assets",
-  {
-    id: id(),
-    orgId: orgId(),
-    tag: text("tag").notNull(), // e.g. AST-0007
-    name: text("name").notNull(),
-    category: text("category").notNull().default("Laptop"),
-    serialNumber: text("serial_number"),
-    purchaseDate: text("purchase_date"),
-    cost: money("cost"),
-    status: text("status", { enum: ASSET_STATUSES }).notNull().default("available"),
-    assignedTo: integer("assigned_to").references(() => employees.id, { onDelete: "set null" }),
-    assignedAt: text("assigned_at"),
-    note: text("note"),
-    createdAt: createdAt(),
-  },
-  (t) => [uniqueIndex("asset_org_tag").on(t.orgId, t.tag)],
 );
 
 export const JOB_STATUSES = ["draft", "open", "on_hold", "closed"] as const;
@@ -1357,3 +1335,86 @@ export type Enquiry = typeof enquiries.$inferSelect;
 export type Employee = typeof employees.$inferSelect;
 export type Invoice = typeof invoices.$inferSelect;
 export type Product = typeof products.$inferSelect;
+
+// --- Assets ---
+
+export const companyAssets = sqliteTable(
+  "company_assets",
+  {
+    id: id(),
+    orgId: orgId(),
+    tag: text("tag").notNull(), // AST-0001
+    name: text("name").notNull(),
+    category: text("category", { enum: ["laptop", "phone", "vehicle", "furniture", "other"] }).notNull().default("other"),
+    serialNumber: text("serial_number"),
+    purchaseDate: text("purchase_date"),
+    purchaseCost: money("purchase_cost"),
+    warrantyExpiry: text("warranty_expiry"),
+    status: text("status", { enum: ["available", "assigned", "in_repair", "retired"] }).notNull().default("available"),
+    notes: text("notes"),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("company_asset_org_tag").on(t.orgId, t.tag), index("company_asset_org_status").on(t.orgId, t.status)],
+);
+
+export const assetAssignments = sqliteTable(
+  "asset_assignments",
+  {
+    id: id(),
+    orgId: orgId(),
+    assetId: integer("asset_id")
+      .notNull()
+      .references(() => companyAssets.id, { onDelete: "cascade" }),
+    employeeId: integer("employee_id")
+      .notNull()
+      .references(() => employees.id, { onDelete: "cascade" }),
+    assignedDate: text("assigned_date").notNull(),
+    returnedDate: text("returned_date"),
+    returnCondition: text("return_condition"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("asset_assign_asset").on(t.assetId),
+    index("asset_assign_employee").on(t.orgId, t.employeeId),
+    uniqueIndex("asset_assign_open").on(t.assetId).where(sql`returned_date is null`),
+  ],
+);
+
+// --- Helpdesk round-robin ---
+export const helpdeskAssignment = sqliteTable(
+  "helpdesk_assignment",
+  {
+    id: id(),
+    orgId: orgId(),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(false),
+    memberUserIds: text("member_user_ids").notNull().default("[]"),
+    lastAssignedUserId: integer("last_assigned_user_id"),
+    updatedAt: createdAt(),
+  },
+  (t) => [uniqueIndex("helpdesk_assignment_org").on(t.orgId)],
+);
+
+// --- Employee documents ---
+// Uploaded file vault (bytes in a BLOB); distinct from the employeeDocuments expiry-metadata table.
+export const EMPLOYEE_DOC_TYPES = ["passport", "visa", "national_id", "tax_id", "contract", "certificate", "other"] as const;
+
+export const employeeFiles = sqliteTable(
+  "employee_files",
+  {
+    id: id(),
+    orgId: orgId(),
+    employeeId: integer("employee_id")
+      .notNull()
+      .references(() => employees.id, { onDelete: "cascade" }),
+    docType: text("doc_type", { enum: EMPLOYEE_DOC_TYPES }).notNull().default("other"),
+    title: text("title"),
+    fileName: text("file_name").notNull(),
+    mimeType: text("mime_type").notNull(),
+    size: integer("size").notNull(),
+    expiryDate: text("expiry_date"),
+    data: blob("data", { mode: "buffer" }).notNull(),
+    uploadedBy: integer("uploaded_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("employee_files_emp_idx").on(t.orgId, t.employeeId)],
+);

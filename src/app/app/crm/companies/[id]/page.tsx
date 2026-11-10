@@ -7,7 +7,7 @@ import { ActionButton } from "@/components/app/forms";
 import { Card, EmptyState, PageHeader, Stat, StatusBadge, Table, Td, Th } from "@/components/app/ui";
 import { db, schema } from "@/db";
 import { formatDate, formatMoney, todayYmd } from "@/lib/format";
-import { packFor, requireWorkspace } from "@/lib/tenancy";
+import { canUseModule, packFor, requireWorkspace } from "@/lib/tenancy";
 import { deleteCompany } from "../../actions";
 import { getMembers } from "../../data";
 import { ActivityForm, ActivityTimeline, CompanyForm, taxFields } from "../../parts";
@@ -48,9 +48,16 @@ export default async function CompanyPage({ params }: { params: Promise<{ id: st
         description={[company.industry, [company.city, company.state].filter(Boolean).join(", ")].filter(Boolean).join(" · ") || undefined}
         tabs={CRM_TABS("companies")}
         actions={
+          <>
+            {canUseModule(ws, "finance") && (
+              <Link href={`/app/finance/statements/${company.id}`} className="inline-flex h-9 items-center rounded-full border border-ink/20 px-4 text-sm font-medium hover:border-ink">
+                Statement
+              </Link>
+            )}
           <ActionButton action={deleteCompany} fields={{ id: company.id }} confirm={`Delete ${company.name}? Contacts and deals are kept but unlinked.`}>
             <Trash2 className="size-3" /> Delete
           </ActionButton>
+          </>
         }
       />
 

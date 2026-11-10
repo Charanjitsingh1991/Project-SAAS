@@ -1,11 +1,13 @@
 import "server-only";
 import { randomBytes } from "node:crypto";
-import { and, asc, eq, ne, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, ne, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import type { PRIORITIES, TICKET_CHANNELS } from "@/db/schema";
 import { logActivity } from "./activity";
 import { slaDue, slugify, statusPatch, type TicketStatus } from "./helpdesk";
 import { DEFAULT_SLA } from "./org";
+import { roleCanUse } from "./roles";
+import { parseUserIds, pickNext } from "./round-robin";
 import { nextNumber } from "./sequence";
 
 type Priority = (typeof PRIORITIES)[number];
@@ -38,6 +40,44 @@ export async function isMember(orgId: number, userId: number) {
   return !!r;
 }
 
+export async function getAssignmentConfig(orgId: number) {
+  const [r] = await db.select().from(schema.helpdeskAssignment).where(eq(schema.helpdeskAssignment.orgId, orgId)).limit(1);
+  return { enabled: r?.enabled ?? false, memberUserIds: parseUserIds(r?.memberUserIds), lastAssignedUserId: r?.lastAssignedUserId ?? null };
+}
+
+/** Org members whose role can use the helpdesk (candidates for the rotation). */
+export async function getHelpdeskAgents(orgId: number) {
+  const rows = await db
+    .select({ id: schema.users.id, name: schema.users.name, role: schema.memberships.role })
+    .from(schema.memberships)
+    .innerJoin(schema.users, eq(schema.memberships.userId, schema.users.id))
+    .where(eq(schema.memberships.orgId, orgId))
+    .orderBy(asc(schema.users.name));
+  return rows.filter((r) => roleCanUse(r.role, "helpdesk"));
+}
+
+/**
+ * Pick and claim the next agent in the rotation, or null when disabled/empty.
+ * The pointer moves by compare-and-swap so concurrent creates get distinct turns.
+ */
+export async function nextAutoAssignee(orgId: number): Promise<number | null> {
+  const A = schema.helpdeskAssignment;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const cfg = await getAssignmentConfig(orgId);
+    if (!cfg.enabled || cfg.memberUserIds.length === 0) return null;
+    const agents = new Set((await getHelpdeskAgents(orgId)).map((a) => a.id));
+    const next = pickNext(cfg.memberUserIds.filter((u) => agents.has(u)), cfg.lastAssignedUserId);
+    if (next == null) return null;
+    const claimed = await db
+      .update(A)
+      .set({ lastAssignedUserId: next })
+      .where(and(eq(A.orgId, orgId), cfg.lastAssignedUserId == null ? isNull(A.lastAssignedUserId) : eq(A.lastAssignedUserId, cfg.lastAssignedUserId)))
+      .returning({ id: A.id });
+    if (claimed.length) return next;
+  }
+  return null;
+}
+
 export type NewTicket = {
   subject: string;
   description?: string | null;
@@ -56,6 +96,8 @@ export type NewTicket = {
  */
 export async function createTicket(orgId: number, input: NewTicket, opts: { userId?: number | null; createdAt?: Date; actor?: string } = {}) {
   const createdAt = opts.createdAt ?? new Date();
+  const autoAssigneeId = input.assigneeId ? null : await nextAutoAssignee(orgId);
+  const assigneeId = input.assigneeId ?? autoAssigneeId;
   const number = await nextNumber(orgId, "ticket");
   const dues = await slaDuesFor(orgId, input.priority, createdAt);
   const email = input.requesterEmail.trim().toLowerCase();
@@ -82,7 +124,7 @@ export async function createTicket(orgId: number, input: NewTicket, opts: { user
       category: input.category ?? null,
       priority: input.priority,
       status: "open",
-      assigneeId: input.assigneeId ?? null,
+      assigneeId,
       ...dues,
       publicToken,
       createdAt,
@@ -97,6 +139,12 @@ export async function createTicket(orgId: number, input: NewTicket, opts: { user
     { orgId, userId: opts.userId ?? null },
     { module: "helpdesk", entityType: "ticket", entityId: t.id, action: "created", summary: `${opts.actor ?? input.requesterName} opened ${number}: ${input.subject}` },
   );
+  if (autoAssigneeId) {
+    await logActivity(
+      { orgId, userId: opts.userId ?? null },
+      { module: "helpdesk", entityType: "ticket", entityId: t.id, action: "auto_assigned", summary: `${number} auto-assigned (round-robin)` },
+    );
+  }
   return { id: t.id, number, publicToken };
 }
 

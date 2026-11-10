@@ -172,6 +172,16 @@ export async function computeInsights(ws: ActiveWorkspace, limit = 20): Promise<
     for (const e of probation) {
       out.push({ severity: "low", module: "hrm", title: `${e.name}'s probation ends ${e.end}`, detail: "Schedule the confirmation review.", href: `/app/hrm/${e.id}` });
     }
+
+    const in30 = ymd(new Date(now.getTime() + 30 * 86_400_000));
+    const warranties = await db
+      .select({ id: schema.companyAssets.id, tag: schema.companyAssets.tag, name: schema.companyAssets.name, end: schema.companyAssets.warrantyExpiry })
+      .from(schema.companyAssets)
+      .where(and(eq(schema.companyAssets.orgId, orgId), ne(schema.companyAssets.status, "retired"), sql`${schema.companyAssets.warrantyExpiry} >= ${today} and ${schema.companyAssets.warrantyExpiry} <= ${in30}`))
+      .limit(5);
+    for (const a of warranties) {
+      out.push({ severity: "low", module: "hrm", title: `Warranty for ${a.tag} ${a.name} expires ${a.end}`, detail: "Renew the warranty or plan a replacement.", href: `/app/hrm/assets/${a.id}` });
+    }
   }
 
   const rank = { high: 0, medium: 1, low: 2 };

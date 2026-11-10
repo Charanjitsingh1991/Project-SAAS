@@ -15,8 +15,11 @@ Audit date: Nov 2026. "✅" = existed before this round, "➕" = added in this r
 | **Helpdesk** | Freshdesk, Zoho Desk | ✅ SLA timers · internal notes · canned replies · KB · customer portal · CSAT<br>➕ public portal only served when the plan includes it and Helpdesk is on |
 | **Workspace** | — | ➕ **audit log** (Enterprise): filter by module, user, date and text; CSV export |
 
+### Added after the audit
+➕ Employee document vault (uploads up to 4 MB, stored in the database, on the employee profile and in My space) · ➕ asset management (`/app/hrm/assets`, assignment history, warranty insights) · ➕ CSV import for companies, contacts and products · ➕ customer statements (`/app/finance/statements`) · ➕ helpdesk round-robin assignment (Helpdesk → Settings) · ➕ automatic recurring invoices (daily Vercel Cron at `/api/cron/recurring-invoices`).
+
 ### Not built yet
-Employee document vault (file uploads) · asset management · CSV import for contacts/companies/products · customer statements · helpdesk round-robin assignment · Abu Dhabi (ADPF) and GCC-national pension schemes · automatic recurring-invoice scheduling (runs on "Run due now").
+Abu Dhabi (ADPF) and GCC-national pension schemes.
 
 ## 2. Module choice and plans
 

@@ -4,10 +4,10 @@ import { CopyLink } from "@/components/app/copy-link";
 import { ActionButton, ActionForm, Input, SubmitButton, Textarea } from "@/components/app/forms";
 import { Card, EmptyState, PageHeader } from "@/components/app/ui";
 import { db, schema } from "@/db";
-import { getSlaPolicies } from "@/lib/helpdesk-data";
+import { getAssignmentConfig, getHelpdeskAgents, getSlaPolicies } from "@/lib/helpdesk-data";
 import { requireWorkspace } from "@/lib/tenancy";
 import { appOrigin } from "@/lib/url";
-import { deleteCannedAction, saveCannedAction, saveSlaAction } from "../actions";
+import { deleteCannedAction, saveAssignmentAction, saveCannedAction, saveSlaAction } from "../actions";
 import { HELPDESK_TABS } from "../tabs";
 
 export const metadata: Metadata = { title: "Helpdesk settings" };
@@ -15,8 +15,10 @@ export const metadata: Metadata = { title: "Helpdesk settings" };
 export default async function HelpdeskSettingsPage() {
   const ws = await requireWorkspace({ module: "helpdesk", manage: true });
   const orgId = ws.org.id;
-  const [policies, canned, origin] = await Promise.all([
+  const [policies, assignment, agents, canned, origin] = await Promise.all([
     getSlaPolicies(orgId),
+    getAssignmentConfig(orgId),
+    getHelpdeskAgents(orgId),
     db.select().from(schema.cannedResponses).where(eq(schema.cannedResponses.orgId, orgId)).orderBy(asc(schema.cannedResponses.title)),
     appOrigin(),
   ]);
@@ -48,6 +50,24 @@ export default async function HelpdeskSettingsPage() {
           </ActionForm>
         </Card>
       </div>
+
+      <Card title="Auto-assignment" className="mt-6">
+        <p className="mb-3 text-sm text-ink-soft">New tickets without an assignee go to the next agent in the rotation (round-robin).</p>
+        <ActionForm action={saveAssignmentAction} resetOnSuccess={false} className="space-y-3">
+          <label className="flex items-center gap-2 text-sm font-medium">
+            <input type="checkbox" name="enabled" defaultChecked={assignment.enabled} /> Enable round-robin assignment
+          </label>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {agents.map((a) => (
+              <label key={a.id} className="flex items-center gap-2 text-sm">
+                <input type="checkbox" name="agents" value={a.id} defaultChecked={assignment.memberUserIds.includes(a.id)} /> {a.name}
+                <span className="text-xs capitalize text-ink-mute">{a.role}</span>
+              </label>
+            ))}
+          </div>
+          <SubmitButton>Save auto-assignment</SubmitButton>
+        </ActionForm>
+      </Card>
 
       <Card title="Canned responses" className="mt-6">
         <div className="space-y-3">

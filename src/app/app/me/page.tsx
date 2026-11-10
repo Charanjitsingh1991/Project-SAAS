@@ -12,6 +12,7 @@ import { monthRange } from "@/lib/hrm";
 import { leaveBalances, resolveMyEmployee } from "@/lib/hrm-data";
 import { hasFeature, packFor, planModules, requireWorkspace, type ActiveWorkspace } from "@/lib/tenancy";
 import { MiniCalendar } from "../hrm/_components/mini-calendar";
+import { DocumentList, listDocuments } from "../hrm/[id]/documents-tab";
 import { applyMyLeave, cancelMyLeave, checkIn, checkOut, submitMyClaim, withdrawMyClaim } from "./actions";
 
 export const metadata: Metadata = { title: "My space" };
@@ -64,6 +65,7 @@ export default async function MySpacePage() {
       .limit(12),
   ]);
 
+  const myDocs = await listDocuments(orgId, emp.id);
   const todayRow = att.find((a) => a.date === today);
   const present = att.filter((a) => a.status === "present" || a.status === "wfh").length;
   const activeBalances = balances.filter((b) => b.type.active);
@@ -223,6 +225,10 @@ export default async function MySpacePage() {
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
         <Card title="My attendance — this month">
           <MiniCalendar month={month} rows={att} holidays={new Map(hols.map((h) => [h.date, h.name]))} today={today} />
+        </Card>
+
+        <Card title="My documents">
+          <DocumentList docs={myDocs} canManage={false} />
         </Card>
 
         <Card title="My payslips">

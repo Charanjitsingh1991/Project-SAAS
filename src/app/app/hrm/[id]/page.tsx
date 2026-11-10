@@ -14,6 +14,7 @@ import { packFor, requireWorkspace } from "@/lib/tenancy";
 import { addTask, deleteTask, linkUser, markExited, reactivate, startNotice, toggleTask, updateEmployee } from "../actions";
 import { CompFields, JobFields, PersonalFields, StatutoryFields, annualPayLabel } from "../_components/employee-fields";
 import { MiniCalendar } from "../_components/mini-calendar";
+import { DocumentsTab } from "./documents-tab";
 
 export const metadata: Metadata = { title: "Employee" };
 
@@ -24,6 +25,7 @@ const TABS = [
   ["leave", "Leave"],
   ["attendance", "Attendance"],
   ["onboarding", "Onboarding"],
+  ["documents", "Documents"],
 ] as const;
 
 export default async function EmployeePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string }> }) {
@@ -163,6 +165,7 @@ export default async function EmployeePage({ params, searchParams }: { params: P
       {tab === "leave" && <LeaveTab empId={emp.id} orgId={orgId} today={today} />}
       {tab === "attendance" && <AttendanceTab empId={emp.id} orgId={orgId} month={month} today={today} />}
       {tab === "onboarding" && <OnboardingTab empId={emp.id} orgId={orgId} />}
+      {tab === "documents" && <DocumentsTab empId={emp.id} orgId={orgId} />}
     </>
   );
 }
