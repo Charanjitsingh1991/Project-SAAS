@@ -1,24 +1,20 @@
 "use client";
 
 import { AnimatePresence, motion } from "motion/react";
-import { useActionState, useState } from "react";
+import { useActionState } from "react";
 import { ArrowUpRight, Loader2 } from "lucide-react";
 import { submitEnquiry } from "@/app/actions/contact";
 import { SectionLabel } from "../ui/reveal";
 import { SpinBadge } from "../ui/spin-badge";
 import { Field, FieldError } from "../ui/field";
-import { cn } from "@/lib/utils";
 
 const INTERESTS = ["HRM", "CRM", "Finance", "Inventory", "Payroll", "Projects", "Helpdesk", "Everything"];
 const SIZES = ["1–25", "26–100", "101–500", "500+"];
 
 export function Contact() {
   const [state, action, pending] = useActionState(submitEnquiry, undefined);
-  const [picked, setPicked] = useState<string[]>([]);
-  const [size, setSize] = useState("");
   const v = state?.values ?? {};
-
-  const toggle = (k: string) => setPicked((p) => (p.includes(k) ? p.filter((x) => x !== k) : [...p, k]));
+  const pickedBefore = (v.interest ?? "").split(", ");
 
   return (
     <section id="contact" className="px-3 pb-3">
@@ -78,51 +74,52 @@ export function Contact() {
                   noValidate
                 >
                   <input type="text" name="website" tabIndex={-1} autoComplete="off" className="hidden" aria-hidden />
-                  <input type="hidden" name="interest" value={picked.join(", ")} />
-                  <input type="hidden" name="teamSize" value={size} />
 
-                  <p className="font-mono text-xs tracking-widest text-ink-mute uppercase">I&apos;m interested in</p>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {INTERESTS.map((k) => {
-                      const on = picked.includes(k);
-                      return (
-                        <motion.button
-                          type="button"
-                          key={k}
-                          onClick={() => toggle(k)}
-                          whileTap={{ scale: 0.92 }}
-                          aria-pressed={on}
-                          className={cn(
-                            "rounded-full border px-4 py-2 text-sm transition-colors",
-                            on ? "border-ink bg-ink text-paper" : "border-ink/20 hover:border-ink",
-                          )}
-                        >
-                          {on && <span className="mr-1 text-lime">✓</span>}
-                          {k}
-                        </motion.button>
-                      );
-                    })}
-                  </div>
+                  {/* Native inputs so selections submit even before hydration. */}
+                  <fieldset>
+                    <legend className="font-mono text-xs tracking-widest text-ink-mute uppercase">I&apos;m interested in</legend>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {INTERESTS.map((k) => (
+                        <label key={k} className="cursor-pointer">
+                          <input
+                            type="checkbox"
+                            name="interest"
+                            value={k}
+                            defaultChecked={pickedBefore.includes(k)}
+                            className="peer sr-only"
+                          />
+                          <span className="inline-flex rounded-full border border-ink/20 px-4 py-2 text-sm transition-all select-none peer-checked:border-ink peer-checked:bg-ink peer-checked:text-paper peer-focus-visible:ring-4 peer-focus-visible:ring-ink/15 hover:border-ink active:scale-95 peer-checked:[&>i]:inline">
+                            <i className="mr-1 hidden text-lime not-italic">✓</i>
+                            {k}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
 
                   <div className="mt-6 grid gap-4 sm:grid-cols-2">
                     <Field label="Your name" name="name" defaultValue={v.name} errors={state?.errors?.name} autoComplete="name" />
                     <Field label="Work email" name="email" type="email" defaultValue={v.email} errors={state?.errors?.email} autoComplete="email" />
                     <Field label="Company" name="company" defaultValue={v.company} autoComplete="organization" />
-                    <div>
-                      <span className="mb-1.5 block text-sm font-medium">Team size</span>
+                    <fieldset>
+                      <legend className="mb-1.5 block text-sm font-medium">Team size</legend>
                       <div className="grid grid-cols-4 gap-1 rounded-xl border border-line bg-card p-1">
                         {SIZES.map((s) => (
-                          <button
-                            type="button"
-                            key={s}
-                            onClick={() => setSize(s)}
-                            className={cn("rounded-lg py-2 text-xs transition-colors", size === s ? "bg-ink text-paper" : "hover:bg-paper-2")}
-                          >
-                            {s}
-                          </button>
+                          <label key={s} className="cursor-pointer">
+                            <input
+                              type="radio"
+                              name="teamSize"
+                              value={s}
+                              defaultChecked={v.teamSize === s}
+                              className="peer sr-only"
+                            />
+                            <span className="block rounded-lg py-2 text-center text-xs transition-colors select-none peer-checked:bg-ink peer-checked:text-paper peer-focus-visible:ring-2 peer-focus-visible:ring-ink/30 hover:bg-paper-2 peer-checked:hover:bg-ink">
+                              {s}
+                            </span>
+                          </label>
                         ))}
                       </div>
-                    </div>
+                    </fieldset>
                   </div>
 
                   <label className="mt-4 block">

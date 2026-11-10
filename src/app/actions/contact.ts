@@ -6,11 +6,9 @@ import { EnquirySchema, type FormState } from "@/lib/definitions";
 
 export async function submitEnquiry(_: FormState, formData: FormData): Promise<FormState> {
   const raw = Object.fromEntries(
-    ["name", "email", "company", "teamSize", "interest", "message"].map((k) => [
-      k,
-      String(formData.get(k) ?? ""),
-    ]),
+    ["name", "email", "company", "teamSize", "message"].map((k) => [k, String(formData.get(k) ?? "")]),
   );
+  raw.interest = formData.getAll("interest").map(String).join(", ");
   // Honeypot: real users never fill this hidden field.
   if (formData.get("website")) return { ok: true, message: "Thanks! We'll be in touch." };
 
