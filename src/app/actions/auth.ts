@@ -1,12 +1,35 @@
 "use server";
 
 import bcrypt from "bcryptjs";
-import { eq } from "drizzle-orm";
+import { and, eq, gt, isNull } from "drizzle-orm";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { db, schema } from "@/db";
 import { LoginSchema, SignupSchema, type FormState } from "@/lib/definitions";
+import { createOrganization } from "@/lib/org";
 import { createSession, deleteSession } from "@/lib/session";
+import { syncSeats } from "@/lib/stripe";
+import { ORG_COOKIE } from "@/lib/tenancy";
+
+/** Only allow same-site relative redirects. */
+function safeNext(value: FormDataEntryValue | null) {
+  const s = typeof value === "string" ? value : "";
+  return s.startsWith("/") && !s.startsWith("//") ? s : "/app";
+}
+
+async function setActiveOrg(orgId: number) {
+  (await cookies()).set(ORG_COOKIE, String(orgId), { httpOnly: true, sameSite: "lax", path: "/", maxAge: 60 * 60 * 24 * 365 });
+}
+
+async function openInvite(token: string) {
+  const [invite] = await db
+    .select()
+    .from(schema.invites)
+    .where(and(eq(schema.invites.token, token), isNull(schema.invites.acceptedAt), gt(schema.invites.expiresAt, new Date())))
+    .limit(1);
+  return invite ?? null;
+}
 
 export async function signup(_: FormState, formData: FormData): Promise<FormState> {
   const raw = {
@@ -15,6 +38,7 @@ export async function signup(_: FormState, formData: FormData): Promise<FormStat
     company: String(formData.get("company") ?? "") || undefined,
     password: String(formData.get("password") ?? ""),
   };
+  const inviteToken = String(formData.get("invite") ?? "");
   const parsed = SignupSchema.safeParse(raw);
   const values = { name: raw.name, email: raw.email, company: raw.company ?? "" };
   if (!parsed.success) {
@@ -22,6 +46,12 @@ export async function signup(_: FormState, formData: FormData): Promise<FormStat
   }
 
   const { name, email, company, password } = parsed.data;
+  const invite = inviteToken ? await openInvite(inviteToken) : null;
+  if (inviteToken && !invite) return { message: "This invite link has expired or was already used.", values };
+  if (invite && invite.email.toLowerCase() !== email) {
+    return { errors: { email: [`This invite is for ${invite.email}.`] }, values };
+  }
+
   const existing = await db
     .select({ id: schema.users.id })
     .from(schema.users)
@@ -37,8 +67,19 @@ export async function signup(_: FormState, formData: FormData): Promise<FormStat
     .values({ name, email, company, passwordHash })
     .returning({ id: schema.users.id });
 
+  let orgId: number;
+  if (invite) {
+    await db.insert(schema.memberships).values({ orgId: invite.orgId, userId: user.id, role: invite.role });
+    await db.update(schema.invites).set({ acceptedAt: new Date() }).where(eq(schema.invites.id, invite.id));
+    orgId = invite.orgId;
+    await syncSeats(orgId);
+  } else {
+    orgId = await createOrganization(user.id, company || `${name.split(" ")[0]}'s workspace`);
+  }
+
   await createSession(user.id);
-  redirect("/dashboard");
+  await setActiveOrg(orgId);
+  redirect("/app");
 }
 
 export async function login(_: FormState, formData: FormData): Promise<FormState> {
@@ -65,10 +106,11 @@ export async function login(_: FormState, formData: FormData): Promise<FormState
   }
 
   await createSession(user.id);
-  redirect("/dashboard");
+  redirect(safeNext(formData.get("next")));
 }
 
 export async function logout() {
   await deleteSession();
+  (await cookies()).delete(ORG_COOKIE);
   redirect("/");
 }

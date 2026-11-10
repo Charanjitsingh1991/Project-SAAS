@@ -1,51 +1,93 @@
-# saas.tech — Marketing site + auth backend
+# saas.tech
 
-Next.js 16 (App Router) site for **saas.tech**, an all-in-one HRM / CRM / Finance / Inventory / Payroll platform.
+Marketing site **and** multi-tenant SaaS app for saas.tech: HRM, CRM, Finance, Inventory, Payroll, Projects, Helpdesk and Analytics in one workspace, with company accounts, roles, a 14-day card-free trial and Stripe billing.
 
 ## Stack
 
 | Layer | Choice |
 | --- | --- |
 | Framework | Next.js 16 (App Router, Server Actions, Cache Components), React 19, TypeScript |
-| Styling | Tailwind CSS v4, custom light "paper & ink" theme |
-| Motion | [Motion](https://motion.dev) (`motion/react`, the successor of Framer Motion), Lenis smooth scroll |
-| Icons / fonts | lucide-react · Bricolage Grotesque, Instrument Serif, Geist, JetBrains Mono via `next/font` |
+| Styling / motion | Tailwind CSS v4 (light "paper & ink" theme), Motion (`motion/react`), Lenis |
 | Database | Drizzle ORM + libSQL (local SQLite file in dev, Turso in production) |
-| Auth | Email + password, bcrypt hashes, signed JWT in an httpOnly cookie (`jose`), `proxy.ts` route guard |
-| Validation | Zod |
+| Auth | Email + password (bcrypt), signed JWT in an httpOnly cookie (`jose`), `proxy.ts` route guard |
+| Payments | Stripe Checkout (per-seat subscriptions), Customer Portal, webhooks |
 
 ## Getting started
 
 ```bash
 npm install
-cp .env.example .env.local            # then set SESSION_SECRET (openssl rand -base64 32)
-npm run db:push                       # creates tables in ./local.db
-npm run dev                           # http://localhost:3000
+cp .env.example .env.local     # set SESSION_SECRET and ADMIN_EMAILS at minimum
+npm run db:push                # creates all tables in ./local.db
+npm run dev                    # http://localhost:3000
 ```
 
-## Features
+## How it works
 
-- **Landing page**: kinetic hero with draggable module stickers, a velocity-reactive marquee, a scroll scene where nine scattered tools collapse into one platform, a pinned horizontal module scroller, a live-typing Copilot demo, counters, swipeable testimonials, pricing with an animated toggle, FAQ, and a footer wordmark reveal.
-- **Sign up / Log in** (`/signup`, `/login`): server-side validation, duplicate-email check, generic error on bad credentials, 7-day session cookie.
-- **Dashboard** (`/dashboard`): protected route showing the account and any enquiries sent from the user's email.
-- **Contact form**: stores enquiries (name, email, company, team size, modules of interest, message, status) in the `enquiries` table. Includes a honeypot field for spam.
+### Sign-up → workspace → trial
+1. `/signup` creates the user **and** a company workspace (they become its **Owner**).
+2. The 14-day trial starts immediately, with no card. Day 1 is the sign-up date in `APP_TIMEZONE`.
+3. From **00:00 on day 14**, everyone in the workspace sees a red banner: add a payment method, or services will be disabled.
+4. At **00:00 on day 15**, an unpaid workspace is **deactivated**. Every module redirects to `/app/billing`, but data is kept.
+5. Adding a card through Stripe Checkout reactivates the workspace instantly. Paying early keeps the remaining free days, and Stripe charges when the trial ends.
 
-## Database
+The logic lives in `src/lib/trial.ts` (`accessFor`) and is enforced by `requireWorkspace()` in `src/lib/tenancy.ts` on every page and server action.
 
-Schema lives in `src/db/schema.ts` (`users`, `enquiries`).
+### Roles
+Owners and admins invite people from **Team & roles** (`/app/team`). Each invite gets a link that is valid for 7 days, and the invitee creates an account and joins the workspace.
 
-- `npm run db:push` applies the schema.
-- `npm run db:studio` opens Drizzle Studio to browse users and enquiries.
+| Role | Modules |
+| --- | --- |
+| Owner / Admin | Everything + team + billing |
+| HR | People, Payroll, Projects |
+| Sales | CRM, Helpdesk, Inventory, Projects |
+| Finance | Finance, Payroll, Inventory, Analytics |
+| Employee | Projects, Helpdesk |
 
-**Production:** create a Turso database, then set `DATABASE_URL=libsql://…` and `DATABASE_AUTH_TOKEN` in your host's environment along with `SESSION_SECRET`. Run `npm run db:push` once against it.
+Plans: **Starter** includes HRM, CRM and Projects. **Growth** includes everything. Trials get everything. The configuration is in `src/lib/roles.ts`.
 
-## Project layout
+### Modules (`/app/*`)
+All data is scoped per workspace (`org_id`).
 
-```
-src/
-  app/            routes (/, /login, /signup, /dashboard) + server actions
-  components/     nav, logo, auth form, sections/*, ui/* (motion primitives)
-  db/             Drizzle client + schema
-  lib/            session (jwt, cookies), data-access layer, zod schemas
-  proxy.ts        redirects for /dashboard and auth pages
-```
+| Module | What it does |
+| --- | --- |
+| HRM | Employees and leave approvals |
+| CRM | Deal pipeline board and contacts |
+| Finance | Invoices (overdue tracking) and expenses by category |
+| Inventory | Products, stock adjustments, low-stock alerts and movement log |
+| Payroll | Monthly runs from active salaries with PF, PT and TDS deductions; payslips; mark paid |
+| Projects | Projects with a task board |
+| Helpdesk | Tickets with priority and status |
+| Analytics | Cash in vs. out, pipeline, headcount and tickets |
+
+New workspaces can click **Load sample data** on the overview to try every module.
+
+### Platform admin (`/admin`)
+Only for emails listed in `ADMIN_EMAILS`:
+- **Workspaces:** status (trial day, paying, deactivated), card on file, and buttons to **extend a trial by 7 days** or end it.
+- **Users:** every sign-up and the workspaces they belong to.
+- **Enquiries:** contact-form messages, which you can mark *new*, *contacted* or *closed*.
+
+## Connecting Stripe
+1. In the Stripe dashboard, create two products, **Starter** and **Growth**. Give each a **monthly** and a **yearly** recurring price, billed **per unit** (one unit = one seat).
+2. Set `STRIPE_SECRET_KEY` and the four `STRIPE_PRICE_*` IDs. The display prices are in `PLAN_PRICES` in `src/lib/stripe.ts`.
+3. Add a webhook endpoint `https://saas.tech/api/stripe/webhook` with these events:
+   - `checkout.session.completed`
+   - `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`
+   - `invoice.paid`, `invoice.payment_failed`
+   - `customer.updated`
+
+   Put its signing secret in `STRIPE_WEBHOOK_SECRET`.
+4. Enable the **Customer Portal** (Settings → Billing → Customer portal) so owners can change card or plan, download invoices, or cancel.
+
+For local testing, run `stripe listen --forward-to localhost:3000/api/stripe/webhook`.
+
+Once connected:
+- The card brand, last 4 digits and expiry are shown on the billing page.
+- The seat count follows the number of members.
+- `past_due` shows a warning but keeps access.
+- A cancelled subscription deactivates the workspace after the period ends.
+
+## Production
+- Set the variables from `.env.example` on your host (Vercel recommended), including `APP_URL=https://saas.tech`.
+- Create a Turso database and set `DATABASE_URL` and `DATABASE_AUTH_TOKEN`, then run `npm run db:push` once against it.
+- `npm run db:studio` opens Drizzle Studio for browsing data.
