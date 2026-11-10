@@ -2,6 +2,7 @@ import "server-only";
 import { and, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { logActivity, type Ctx } from "@/lib/activity";
+import { packOf } from "@/lib/countries";
 import { addDaysYmd, todayYmd } from "@/lib/format";
 import { eachDate, isWeekend, monthRange, shiftMonth, workingDates } from "@/lib/hrm";
 import { createChecklist } from "@/lib/hrm-data";
@@ -23,9 +24,40 @@ type Spec = {
   dob: string;
   metro?: boolean;
   noStat?: boolean;
+  /** UAE: ISO nationality and monthly package in AED (ctcL unused). */
+  nat?: string;
+  monthly?: number;
 };
 
 const IFSC = ["HDFC0001234", "ICIC0000456", "SBIN0005943", "UTIB0000312"];
+const UAE_BANKS = [
+  { name: "Emirates NBD", code: "026", routing: "302620122" },
+  { name: "First Abu Dhabi Bank", code: "035", routing: "803520106" },
+  { name: "Abu Dhabi Commercial Bank", code: "003", routing: "600310101" },
+  { name: "Mashreq Bank", code: "033", routing: "203320101" },
+];
+const UAE_MOBILE_PREFIX = ["50", "52", "54", "55", "56", "58"];
+/** Residence visa file prefix by emirate of issue. */
+const VISA_FILE: Record<string, string> = { Dubai: "201", "Abu Dhabi": "101", Sharjah: "301" };
+
+const luhnCheckDigit = (payload: string) => {
+  let sum = 0;
+  for (let i = 0; i < payload.length; i++) {
+    let d = Number(payload[payload.length - 1 - i]);
+    if (i % 2 === 0) d = d * 2 > 9 ? d * 2 - 9 : d * 2;
+    sum += d;
+  }
+  return (10 - (sum % 10)) % 10;
+};
+const uaeIban = (bankCode: string, account: string) => {
+  const bban = `${bankCode}${account}`;
+  const check = 98 - Number(BigInt(`${bban}101400`) % BigInt(97)); // "AE00" → A=10, E=14
+  return `AE${String(check).padStart(2, "0")}${bban}`;
+};
+const emiratesId = (birthYear: string, n: number) => {
+  const payload = `784${birthYear}${String(1_000_000 + ((n * 2_718_281) % 9_000_000)).padStart(7, "0")}`;
+  return `784-${birthYear}-${payload.slice(7)}-${luhnCheckDigit(payload)}`;
+};
 const L = (n: number) => String.fromCharCode(65 + (n % 26));
 const hash = (a: number, s: string) => {
   let h = a * 2654435761;
@@ -46,21 +78,21 @@ export async function seedHrm(ctx: Ctx): Promise<void> {
   const prev = monthRange(prevMonth);
 
   const [owner] = ctx.userId ? await db.select().from(schema.users).where(eq(schema.users.id, ctx.userId)).limit(1) : [];
+  const [org] = await db.select().from(schema.organizations).where(eq(schema.organizations.id, orgId)).limit(1);
+  const pack = packOf(org ?? {});
+  const isAE = pack.code === "AE";
 
   /* Leave types (created with the workspace; ensure they exist). */
   let types = await db.select().from(schema.leaveTypes).where(eq(schema.leaveTypes.orgId, orgId));
   if (!types.length) {
     types = await db
       .insert(schema.leaveTypes)
-      .values([
-        { orgId, name: "Casual leave", code: "CL", annualQuota: 12, paid: true, color: "mint" },
-        { orgId, name: "Sick leave", code: "SL", annualQuota: 12, paid: true, color: "sky" },
-        { orgId, name: "Earned leave", code: "EL", annualQuota: 15, paid: true, color: "lime" },
-        { orgId, name: "Leave without pay", code: "LWP", annualQuota: 0, paid: false, color: "rose" },
-      ])
+      .values(pack.hr.leaveTypes.map((t) => ({ orgId, name: t.name, code: t.code, annualQuota: t.annualQuota, paid: t.payPercent > 0, payPercent: t.payPercent, appliesTo: t.appliesTo, color: t.color })))
       .returning();
   }
-  const type = (code: string) => types.find((t) => t.code === code)!;
+  // Requests are authored with Indian codes; map them onto the UAE pack's leave types.
+  const LEAVE_CODE: Record<string, string> = isAE ? { CL: "AL", EL: "AL", LWP: "UL" } : {};
+  const type = (code: string) => types.find((t) => t.code === (LEAVE_CODE[code] ?? code))!;
 
   /* Departments */
   const deptRows = await db
@@ -69,8 +101,27 @@ export async function seedHrm(ctx: Ctx): Promise<void> {
     .returning();
   const deptId = (n: string | null) => deptRows.find((d) => d.name === n)?.id ?? null;
 
-  /* Employees */
-  const specs: Spec[] = [
+  /* Employees (same keys in both countries: later sections reference them) */
+  const specsAE: Spec[] = [
+    { key: "ceo", name: owner?.name ?? "Founder", desig: "Founder & CEO", dept: null, mgr: null, ctcL: 0, monthly: 55_000, nat: "IN", joinAgo: 1500, loc: "Dubai", gender: "male", dob: "1985-03-12" },
+    { key: "eng", name: "Omar Haddad", desig: "VP Engineering", dept: "Engineering", mgr: "ceo", ctcL: 0, monthly: 45_000, nat: "JO", joinAgo: 1320, loc: "Dubai", gender: "male", dob: "1987-07-21" },
+    { key: "sales", name: "Sarah Mitchell", desig: "Head of Sales", dept: "Sales", mgr: "ceo", ctcL: 0, monthly: 38_000, nat: "GB", joinAgo: 1100, loc: "Dubai", gender: "female", dob: "1989-11-02" },
+    { key: "fin", name: "Ahmed Al Mansoori", desig: "Finance Controller", dept: "Finance", mgr: "ceo", ctcL: 0, monthly: 40_000, nat: "AE", joinAgo: 980, loc: "Abu Dhabi", gender: "male", dob: "1986-01-18" },
+    { key: "ops", name: "Fatima Khan", desig: "Operations Manager", dept: "Operations", mgr: "ceo", ctcL: 0, monthly: 26_000, nat: "PK", joinAgo: 900, loc: "Sharjah", gender: "female", dob: "1990-09-09" },
+    { key: "hr", name: "Mariam Al Hashemi", desig: "HR Manager", dept: "People", mgr: "ceo", ctcL: 0, monthly: 30_000, nat: "AE", joinAgo: 800, loc: "Dubai", gender: "female", dob: "1991-04-27" },
+    { key: "design", name: "Karim Mansour", desig: "Design Lead", dept: "Design", mgr: "ceo", ctcL: 0, monthly: 28_000, nat: "EG", joinAgo: 700, loc: "Dubai", gender: "male", dob: "1992-12-05" },
+    { key: "arjun", name: "Arjun Reddy", desig: "Senior Software Engineer", dept: "Engineering", mgr: "eng", ctcL: 0, monthly: 24_000, nat: "IN", joinAgo: 640, loc: "Dubai", gender: "male", dob: "1993-06-30" },
+    { key: "sneha", name: "Maria Santos", desig: "Software Engineer", dept: "Engineering", mgr: "eng", ctcL: 0, monthly: 16_000, nat: "PH", joinAgo: 420, loc: "Dubai", gender: "female", dob: "1996-02-14" },
+    { key: "intern", name: "Yousef Saleh", desig: "Engineering Intern", dept: "Engineering", mgr: "eng", type: "intern", ctcL: 0, monthly: 4_000, nat: "LB", joinAgo: 80, loc: "Dubai", gender: "male", dob: "2002-08-19", noStat: true },
+    { key: "divya", name: "Nadia Rahman", desig: "Account Executive", dept: "Sales", mgr: "sales", ctcL: 0, monthly: 14_000, nat: "BD", joinAgo: 380, loc: "Dubai", gender: "female", dob: "1995-10-23" },
+    { key: "pooja", name: "Rania Aziz", desig: "Sales Associate", dept: "Sales", mgr: "sales", ctcL: 0, monthly: 11_000, nat: "LB", joinAgo: 500, loc: "Dubai", gender: "female", dob: "1997-05-06" },
+    { key: "meera", name: "Priya Nair", desig: "Accountant", dept: "Finance", mgr: "fin", ctcL: 0, monthly: 12_000, nat: "IN", joinAgo: 450, loc: "Abu Dhabi", gender: "female", dob: "1994-03-28" },
+    { key: "sandeep", name: "Ramesh Thapa", desig: "Operations Executive", dept: "Operations", mgr: "ops", ctcL: 0, monthly: 6_500, nat: "NP", joinAgo: 300, loc: "Sharjah", gender: "male", dob: "1998-01-11" },
+    { key: "tanvi", name: "Grace Wanjiru", desig: "Talent Acquisition Specialist", dept: "People", mgr: "hr", ctcL: 0, monthly: 12_000, nat: "KE", joinAgo: 520, loc: "Dubai", gender: "female", dob: "1996-07-15" },
+    { key: "aditya", name: "Daniel Fernando", desig: "UI/UX Designer", dept: "Design", mgr: "design", ctcL: 0, monthly: 15_000, nat: "LK", joinAgo: 0, joinDate: monthStart, loc: "Dubai", gender: "male", dob: "1997-09-30" },
+    { key: "farhan", name: "Farhan Ali", desig: "Freelance Illustrator", dept: "Design", mgr: "design", type: "contract", ctcL: 0, monthly: 14_000, nat: "PK", joinAgo: 200, loc: "Remote", gender: "male", dob: "1991-02-02", noStat: true },
+  ];
+  const specsIN: Spec[] = [
     { key: "ceo", name: owner?.name ?? "Founder", desig: "Founder & CEO", dept: null, mgr: null, ctcL: 36, joinAgo: 1500, loc: "Bengaluru", gender: "male", dob: "1985-03-12" },
     { key: "eng", name: "Rohan Mehta", desig: "VP Engineering", dept: "Engineering", mgr: "ceo", ctcL: 30, joinAgo: 1320, loc: "Bengaluru", gender: "male", dob: "1987-07-21" },
     { key: "sales", name: "Ananya Iyer", desig: "Head of Sales", dept: "Sales", mgr: "ceo", ctcL: 24, joinAgo: 1100, loc: "Mumbai", gender: "female", dob: "1989-11-02" },
@@ -89,6 +140,40 @@ export async function seedHrm(ctx: Ctx): Promise<void> {
     { key: "aditya", name: "Aditya Rao", desig: "UI/UX Designer", dept: "Design", mgr: "design", ctcL: 12, joinAgo: 0, joinDate: monthStart, loc: "Bengaluru", gender: "male", dob: "1997-09-30" },
     { key: "farhan", name: "Farhan Ali", desig: "Freelance Illustrator", dept: "Design", mgr: "design", type: "contract", ctcL: 14, joinAgo: 200, loc: "Remote", gender: "male", dob: "1991-02-02", noStat: true },
   ];
+  const specs = isAE ? specsAE : specsIN;
+
+  /** UAE identity, work-permit, WPS and bank fields plus the component split (minor units). */
+  const uaeFields = (s: Spec, i: number, joinDate: string): Partial<typeof schema.employees.$inferInsert> => {
+    const monthly = s.monthly ?? 0;
+    const split = pack.payroll.defaultSplit;
+    const basic = Math.round(monthly * (split.basic ?? 0.6));
+    const housing = Math.round(monthly * (split.housing ?? 0.25));
+    const transport = Math.round(monthly * (split.transport ?? 0.1));
+    const components = { basic: basic * 100, housing: housing * 100, transport: transport * 100, other: (monthly - basic - housing - transport) * 100 };
+    const national = s.nat === "AE";
+    const contractor = s.type === "contract";
+    const bank = UAE_BANKS[i % UAE_BANKS.length];
+    // One visa (and its Emirates ID) expires within 60 days, to light up the document-expiry reminders.
+    const visaExpiry = s.key === "arjun" ? addDaysYmd(today, 45) : addDaysYmd(today, 150 + ((i * 97) % 520));
+    return {
+      annualCtc: monthly * 12 * 100,
+      salaryComponents: JSON.stringify(components),
+      pfEnrolled: false,
+      metro: false,
+      nationality: s.nat ?? null,
+      emiratesId: emiratesId(s.dob.slice(0, 4), i + 1),
+      emiratesIdExpiry: national ? addDaysYmd(today, 900 + i * 31) : visaExpiry,
+      passportNumber: `${L(i + 13)}${String(1_000_000 + ((i + 1) * 386_117) % 9_000_000).padStart(7, "0")}`,
+      passportExpiry: addDaysYmd(today, 420 + i * 83),
+      visaNumber: national || contractor ? null : `${VISA_FILE[s.loc] ?? "201"}/${joinDate.slice(0, 4)}/${String(1_000_000 + ((i + 1) * 523_007) % 9_000_000).padStart(7, "0")}`,
+      visaExpiry: national || contractor ? null : visaExpiry,
+      labourCardNumber: national || contractor ? null : String(10_000_000 + ((i + 1) * 1_234_577) % 90_000_000),
+      wpsPersonId: contractor ? null : `1001${String(2_000_000_000 + i * 7_654_321)}`,
+      iban: uaeIban(bank.code, String(1_000_000_000_000_000 + (i + 1) * 104_729_000_003).slice(0, 16)),
+      bankName: bank.name,
+      bankRoutingCode: bank.routing,
+    };
+  };
 
   const ids = new Map<string, number>();
   const empRows = new Map<string, { id: number; joinDate: string; exitDate: string | null }>();
@@ -140,31 +225,16 @@ export async function seedHrm(ctx: Ctx): Promise<void> {
   }
 
   /* Holidays for the current year (and the previous month's year when it differs) */
-  const years = [...new Set([today.slice(0, 4), prev.start.slice(0, 4)])];
-  const MOVABLE: Record<string, [string, string, string]> = {
-    "2025": ["03-14", "10-02", "10-20"],
-    "2026": ["03-04", "10-20", "11-08"],
-  };
-  const holidayRows: { orgId: number; date: string; name: string; optional: boolean }[] = [];
-  for (const y of years) {
-    const [holi, dussehra, diwali] = MOVABLE[y] ?? ["03-14", "10-20", "11-01"];
-    const list: [string, string, boolean][] = [
-      ["01-01", "New Year's Day", true],
-      ["01-26", "Republic Day", false],
-      [holi, "Holi", false],
-      ["05-01", "Labour Day", false],
-      ["08-15", "Independence Day", false],
-      ["10-02", "Gandhi Jayanti", false],
-      [dussehra, "Dussehra", false],
-      [diwali, "Diwali", false],
-      ["12-25", "Christmas", false],
-    ];
-    for (const [md, name, optional] of list) {
-      const date = `${y}-${md}`;
-      if (!holidayRows.some((h) => h.date === date)) holidayRows.push({ orgId, date, name, optional });
-    }
+  // The calendar comes from the country pack (initOrgDefaults seeds this year and next); add the previous month's year in January.
+  const years = [...new Set([Number(today.slice(0, 4)), Number(prev.start.slice(0, 4))])];
+  const packHolidays = years.flatMap((y) => pack.hr.holidays(y));
+  if (packHolidays.length) {
+    await db
+      .insert(schema.holidays)
+      .values(packHolidays.map((h) => ({ orgId, date: h.date, name: h.name, optional: !!h.optional })))
+      .onConflictDoNothing();
   }
-  await db.insert(schema.holidays).values(holidayRows);
+  const holidayRows = await db.select().from(schema.holidays).where(eq(schema.holidays.orgId, orgId));
   const holidays = new Set(holidayRows.filter((h) => !h.optional).map((h) => h.date));
 
   /* Attendance: previous month in full + this month to date */
