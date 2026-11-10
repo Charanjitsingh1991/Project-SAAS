@@ -11,8 +11,10 @@ import { accessFor } from "./trial";
 
 export const ORG_COOKIE = "saas_org";
 
+const DEFAULT_ADMIN_EMAILS = "charanjit@thecharanjitsingh.com";
+
 export function isPlatformAdmin(email: string) {
-  const list = (process.env.ADMIN_EMAILS ?? "")
+  const list = (process.env.ADMIN_EMAILS || DEFAULT_ADMIN_EMAILS)
     .split(",")
     .map((e) => e.trim().toLowerCase())
     .filter(Boolean);

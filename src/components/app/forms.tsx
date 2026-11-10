@@ -70,7 +70,7 @@ export function Input({ label, name, className, ...props }: InputProps) {
 type SelectProps = React.SelectHTMLAttributes<HTMLSelectElement> & {
   label: string;
   name: string;
-  options: (string | { value: string | number; label: string })[];
+  options: readonly (string | { value: string | number; label: string })[];
   placeholder?: string;
 };
 
