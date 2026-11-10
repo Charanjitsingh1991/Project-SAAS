@@ -3,11 +3,12 @@
 import { animate, motion, useInView } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 
+// Product facts only; replace with real customer metrics once they exist.
 const STATS = [
-  { value: 2500, suffix: "+", label: "companies run on saasmodels.tech", note: "across 31 countries" },
-  { value: 68, suffix: "%", label: "lower software spend", note: "vs. their old stack" },
-  { value: 9, suffix: " hrs", label: "saved per manager, weekly", note: "median, 2026 survey" },
-  { value: 99.98, suffix: "%", label: "uptime last 12 months", note: "status.saasmodels.tech", decimals: 2 },
+  { value: 8, suffix: " modules", label: "in one workspace", note: "HRM to Helpdesk, one database" },
+  { value: 2, suffix: " countries", label: "tax & payroll built in", note: "India GST · UAE VAT & WPS" },
+  { value: 14, suffix: " days", label: "free trial", note: "no card needed" },
+  { value: 7, suffix: "", label: "cross-module automations", note: "switch each on or off" },
 ];
 
 function Counter({ value, decimals = 0, suffix }: { value: number; decimals?: number; suffix: string }) {
@@ -43,7 +44,7 @@ export function Stats() {
             className="border-line px-5 py-12 not-first:border-l max-md:nth-3:border-l-0 max-md:nth-[n+3]:border-t md:px-8"
           >
             <p className="font-display text-[clamp(2.4rem,5vw,4rem)] leading-none font-bold tracking-tight">
-              <Counter value={s.value} decimals={s.decimals} suffix={s.suffix} />
+              <Counter value={s.value} suffix={s.suffix} />
             </p>
             <p className="mt-3 text-[15px] font-medium">{s.label}</p>
             <p className="font-mono text-xs text-ink-mute">{s.note}</p>

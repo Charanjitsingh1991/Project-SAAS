@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { BarChart3, CircleUserRound, CreditCard, History, LayoutGrid, LogOut, Settings2, ShieldCheck, UsersRound } from "lucide-react";
+import { BarChart3, CircleUserRound, CreditCard, History, LayoutGrid, LogOut, Plug, Settings2, ShieldCheck, Sparkles, UsersRound } from "lucide-react";
 import { logout } from "@/app/actions/auth";
 import { switchWorkspace } from "@/app/app/actions";
 import { Logo } from "@/components/logo";
@@ -20,6 +20,8 @@ function buildNav(ws: ActiveWorkspace): { main: NavItem[]; modules: NavItem[]; s
     color: m.color,
   }));
   const settings: NavItem[] = [];
+  // Everyone can reach Integrations: the personal calendar feed needs no admin rights.
+  settings.push({ href: "/app/integrations", label: "Integrations", icon: <Plug className="size-3.5" /> });
   if (canManage(ws.role)) {
     settings.push({ href: "/app/team", label: "Team & roles", icon: <UsersRound className="size-3.5" /> });
     settings.push({ href: "/app/billing", label: "Billing", icon: <CreditCard className="size-3.5" /> });
@@ -31,6 +33,7 @@ function buildNav(ws: ActiveWorkspace): { main: NavItem[]; modules: NavItem[]; s
     main: [
       { href: "/app", label: "Overview", icon: <LayoutGrid className="size-3.5" /> },
       { href: "/app/me", label: "My space", icon: <CircleUserRound className="size-3.5" /> },
+      ...(hasFeature(ws, "copilot") ? [{ href: "/app/ask", label: "Ask AI", icon: <Sparkles className="size-3.5" /> }] : []),
     ],
     modules,
     settings,

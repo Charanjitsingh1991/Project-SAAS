@@ -102,7 +102,7 @@ export function AuthForm({
       <p className="pt-2 text-center text-sm text-ink-soft">
         {isSignup ? "Already have an account? " : "New to saasmodels.tech? "}
         <Link
-          href={isSignup ? (invite ? `/login?next=/invite/${invite.token}` : "/login") : "/signup"}
+          href={isSignup ? (invite ? `/login?next=/invite/${invite.token}&invite=${invite.token}` : "/login") : "/signup"}
           className="font-medium text-ink underline decoration-signal decoration-2 underline-offset-4"
         >
           {isSignup ? "Log in" : "Create an account"}

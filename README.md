@@ -100,6 +100,9 @@ Once connected:
    - `CRON_SECRET` (any random string; Vercel Cron sends it to `/api/cron/recurring-invoices`)
    - `ADMIN_EMAILS`, `APP_TIMEZONE`, `APP_URL` (your production URL)
    - `RESEND_API_KEY` and `EMAIL_FROM` for email (invites, password reset, notifications). Verify your sending domain in Resend first.
+   - `ENCRYPTION_KEY` (32+ random characters, set once and never change; encrypts stored webhook URLs and Razorpay keys)
+   - optional: `AI_API_KEY` for Ask AI (a free Google Gemini key from aistudio.google.com works; without it Ask AI uses built-in rules)
+   - optional: `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` and `MICROSOFT_CLIENT_ID`/`MICROSOFT_CLIENT_SECRET` for social sign-in (redirect URIs `<APP_URL>/api/auth/google/callback` and `<APP_URL>/api/auth/microsoft/callback`)
    - optional: the `STRIPE_*` variables (billing pages work in trial mode without them)
 4. Deploy. `vercel.json` schedules the daily recurring-invoice run at 00:30 UTC. A deployment without a database fails with a clear error, because Vercel can't keep a local SQLite file.
 

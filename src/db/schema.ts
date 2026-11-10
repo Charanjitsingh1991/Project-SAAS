@@ -1503,3 +1503,170 @@ export const hrLetters = sqliteTable(
   },
   (t) => [index("hr_letters_emp").on(t.orgId, t.employeeId), uniqueIndex("hr_letters_org_number").on(t.orgId, t.number)],
 );
+
+/* ═════════════ Integrations ═════════════ */
+
+// --- Outgoing webhooks (Zapier, Make, n8n, custom) and chat notifications (Slack, Teams, Google Chat) ---
+export const WEBHOOK_KINDS = ["webhook", "slack", "teams", "google_chat"] as const;
+
+export const webhookEndpoints = sqliteTable(
+  "webhook_endpoints",
+  {
+    id: id(),
+    orgId: orgId(),
+    kind: text("kind", { enum: WEBHOOK_KINDS }).notNull().default("webhook"),
+    name: text("name").notNull(),
+    /** Encrypted with lib/crypto (URLs of chat webhooks are bearer secrets). */
+    urlEnc: text("url_enc").notNull(),
+    urlHint: text("url_hint").notNull(),
+    /** HMAC-SHA256 signing secret for kind=webhook (encrypted). */
+    secretEnc: text("secret_enc"),
+    /** JSON array of event names, e.g. ["invoice.paid","deal.won"]. */
+    events: text("events").notNull().default("[]"),
+    active: integer("active", { mode: "boolean" }).notNull().default(true),
+    failureCount: integer("failure_count").notNull().default(0),
+    lastDeliveryAt: integer("last_delivery_at", { mode: "timestamp" }),
+    createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("webhook_endpoints_org").on(t.orgId)],
+);
+
+export const WEBHOOK_DELIVERY_STATUSES = ["pending", "succeeded", "failed"] as const;
+
+export const webhookDeliveries = sqliteTable(
+  "webhook_deliveries",
+  {
+    id: id(),
+    orgId: orgId(),
+    endpointId: integer("endpoint_id")
+      .notNull()
+      .references(() => webhookEndpoints.id, { onDelete: "cascade" }),
+    event: text("event").notNull(),
+    /** Unique event id sent to receivers for idempotency. */
+    eventId: text("event_id").notNull(),
+    payload: text("payload").notNull(),
+    status: text("status", { enum: WEBHOOK_DELIVERY_STATUSES }).notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    responseStatus: integer("response_status"),
+    responseBody: text("response_body"),
+    nextAttemptAt: integer("next_attempt_at", { mode: "timestamp" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("webhook_deliveries_endpoint").on(t.endpointId, t.createdAt), index("webhook_deliveries_retry").on(t.status, t.nextAttemptAt)],
+);
+
+// --- REST API keys ---
+export const API_SCOPES = ["read", "write"] as const;
+
+export const apiKeys = sqliteTable(
+  "api_keys",
+  {
+    id: id(),
+    orgId: orgId(),
+    name: text("name").notNull(),
+    /** First characters shown in the UI, e.g. "sm_live_ab12". */
+    prefix: text("prefix").notNull(),
+    /** SHA-256 hex of the full key; the key itself is shown once. */
+    keyHash: text("key_hash").notNull().unique(),
+    scope: text("scope", { enum: API_SCOPES }).notNull().default("read"),
+    createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+    lastUsedAt: integer("last_used_at", { mode: "timestamp" }),
+    revokedAt: integer("revoked_at", { mode: "timestamp" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("api_keys_org").on(t.orgId)],
+);
+
+// --- Calendar feeds (iCal subscription for Google / Outlook / Apple Calendar) ---
+export const calendarFeeds = sqliteTable(
+  "calendar_feeds",
+  {
+    id: id(),
+    orgId: orgId(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** SHA-256 hex of the secret token in the feed URL. */
+    tokenHash: text("token_hash").notNull().unique(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("calendar_feeds_org_user").on(t.orgId, t.userId)],
+);
+
+// --- Per-workspace third-party credentials (e.g. Razorpay), encrypted ---
+export const ORG_INTEGRATION_PROVIDERS = ["razorpay"] as const;
+
+export const orgIntegrations = sqliteTable(
+  "org_integrations",
+  {
+    id: id(),
+    orgId: orgId(),
+    provider: text("provider", { enum: ORG_INTEGRATION_PROVIDERS }).notNull(),
+    /** Encrypted JSON of credentials (lib/crypto). */
+    configEnc: text("config_enc").notNull(),
+    /** Non-secret display hint, e.g. key id. */
+    hint: text("hint"),
+    active: integer("active", { mode: "boolean" }).notNull().default(true),
+    updatedAt: createdAt(),
+  },
+  (t) => [uniqueIndex("org_integrations_org_provider").on(t.orgId, t.provider)],
+);
+
+/** Online payment links created for invoices (Razorpay). */
+export const invoicePaymentLinks = sqliteTable(
+  "invoice_payment_links",
+  {
+    id: id(),
+    orgId: orgId(),
+    invoiceId: integer("invoice_id")
+      .notNull()
+      .references(() => invoices.id, { onDelete: "cascade" }),
+    provider: text("provider", { enum: ORG_INTEGRATION_PROVIDERS }).notNull(),
+    externalId: text("external_id").notNull(),
+    url: text("url").notNull(),
+    amount: integer("amount").notNull(),
+    status: text("status", { enum: ["created", "paid", "cancelled", "expired"] }).notNull().default("created"),
+    /** Payment id recorded on the invoice once paid (idempotency for webhooks). */
+    paymentRef: text("payment_ref"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("invoice_payment_links_invoice").on(t.invoiceId), uniqueIndex("invoice_payment_links_ext").on(t.provider, t.externalId)],
+);
+
+// --- Social sign-in (Google, Microsoft) ---
+export const OAUTH_PROVIDERS = ["google", "microsoft"] as const;
+
+export const oauthAccounts = sqliteTable(
+  "oauth_accounts",
+  {
+    id: id(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    provider: text("provider", { enum: OAUTH_PROVIDERS }).notNull(),
+    /** Provider's stable subject id (OIDC `sub`). */
+    subject: text("subject").notNull(),
+    email: text("email").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("oauth_provider_subject").on(t.provider, t.subject), index("oauth_user").on(t.userId)],
+);
+
+// --- Ask AI ---
+/** One row per question, for daily limits and an audit trail. */
+export const aiQueries = sqliteTable(
+  "ai_queries",
+  {
+    id: id(),
+    orgId: orgId(),
+    userId: integer("user_id").references(() => users.id, { onDelete: "set null" }),
+    question: text("question").notNull(),
+    /** JSON array of tool names used to answer. */
+    tools: text("tools").notNull().default("[]"),
+    mode: text("mode", { enum: ["ai", "rules"] }).notNull(),
+    ok: integer("ok", { mode: "boolean" }).notNull().default(true),
+    createdAt: createdAt(),
+  },
+  (t) => [index("ai_queries_org_created").on(t.orgId, t.createdAt)],
+);

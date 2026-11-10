@@ -5,6 +5,7 @@ import { logActivity, type Ctx } from "./activity";
 import { parseAutomations } from "./automations";
 import { weekendOf } from "./countries";
 import { addDaysYmd, formatDate } from "./format";
+import { emitEvent } from "./integrations/events";
 import { ONBOARDING_TEMPLATE, OFFBOARDING_TEMPLATE, countLeaveDays, isValidYmd, leaveBalance, workingDates } from "./hrm";
 import { REGULARIZATION_STATUSES_ALLOWED, canDecideRequest, parseRegularizationTimes, regularizationDateError } from "./approvals";
 
@@ -122,6 +123,7 @@ export async function submitLeave(ctx: Ctx, input: LeaveInput): Promise<LeaveRes
     action: "applied",
     summary: `${emp.name} applied for ${days} day(s) of ${type.name} (${formatDate(startDate)}${endDate !== startDate ? ` – ${formatDate(endDate)}` : ""})`,
   });
+  await emitEvent(ctx, "leave.requested", { id: row.id, employee: emp.name, leave_type: type.name, start_date: startDate, end_date: endDate, days });
   return { ok: true, id: row.id, days };
 }
 
@@ -201,6 +203,15 @@ export async function decideLeave(
     entityId: req.id,
     action: action === "approve" ? "approved" : action === "reject" ? "rejected" : "cancelled",
     summary: `${action === "approve" ? "Approved" : action === "reject" ? "Rejected" : "Cancelled"} ${emp?.name ?? "employee"}'s ${req.days} day(s) of ${type?.name ?? "leave"} (${formatDate(req.startDate)})`,
+  });
+  await emitEvent(ctx, "leave.decided", {
+    id: req.id,
+    employee: emp?.name ?? null,
+    leave_type: type?.name ?? null,
+    decision: action === "approve" ? "approved" : action === "reject" ? "rejected" : "cancelled",
+    start_date: req.startDate,
+    end_date: req.endDate,
+    days: req.days,
   });
   return { ok: true };
 }

@@ -4,6 +4,7 @@ import { and, asc, eq, isNull, ne, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import type { PRIORITIES, TICKET_CHANNELS } from "@/db/schema";
 import { logActivity } from "./activity";
+import { emitEvent } from "./integrations/events";
 import { slaDue, slugify, statusPatch, type TicketStatus } from "./helpdesk";
 import { DEFAULT_SLA } from "./org";
 import { roleCanUse } from "./roles";
@@ -145,6 +146,7 @@ export async function createTicket(orgId: number, input: NewTicket, opts: { user
       { module: "helpdesk", entityType: "ticket", entityId: t.id, action: "auto_assigned", summary: `${number} auto-assigned (round-robin)` },
     );
   }
+  await emitEvent({ orgId, userId: opts.userId ?? null }, "ticket.created", { id: t.id, number, subject: input.subject, priority: input.priority, channel: input.channel, requester_name: input.requesterName });
   return { id: t.id, number, publicToken };
 }
 
@@ -164,6 +166,7 @@ export async function setTicketStatus(orgId: number, t: TicketRow, status: Ticke
     .where(and(eq(schema.tickets.id, t.id), eq(schema.tickets.orgId, orgId)));
   await addSystemMessage(orgId, t.id, `${actor.name} changed status from ${t.status.replace("_", " ")} to ${status.replace("_", " ")}`, actor.userId, now);
   await logActivity({ orgId, userId: actor.userId }, { module: "helpdesk", entityType: "ticket", entityId: t.id, action: "status", summary: `${t.number} → ${status.replace("_", " ")}` });
+  if (status === "resolved") await emitEvent({ orgId, userId: actor.userId }, "ticket.resolved", { id: t.id, number: t.number, subject: t.subject });
   return true;
 }
 

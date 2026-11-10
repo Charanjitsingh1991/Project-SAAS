@@ -26,13 +26,13 @@ const PROMPTS = [
     head: ["Employee", "Dates", "Role"],
   },
   {
-    q: "Reorder anything below 2 weeks of stock.",
+    q: "What's below 2 weeks of stock?",
     rows: [
-      ["USB-C docks", "200 units", "PO-2291 drafted"],
-      ["Thermal rolls", "1,500", "PO-2292 drafted"],
-      ["Packing tape", "600", "PO-2293 drafted"],
+      ["USB-C docks", "9 days left", "Reorder 200"],
+      ["Thermal rolls", "6 days left", "Reorder 1,500"],
+      ["Packing tape", "12 days left", "Reorder 600"],
     ],
-    head: ["Item", "Qty", "Action"],
+    head: ["Item", "Cover", "Suggested"],
   },
 ];
 
@@ -107,7 +107,7 @@ function Copilot() {
                   </span>
                 </motion.div>
               ))}
-              <p className="mt-4 font-mono text-[11px] text-paper/40">↳ pulled from Finance + CRM + HRM + Inventory in 0.4s</p>
+              <p className="mt-4 font-mono text-[11px] text-paper/40">↳ answered from your Finance, CRM, HRM and Inventory data</p>
             </motion.div>
           )}
         </AnimatePresence>
@@ -132,10 +132,10 @@ function Copilot() {
 }
 
 const FEATURES = [
-  { icon: Workflow, title: "No-code workflows", body: "Approvals and automations that cross modules: offer signed → laptop ordered → payroll set.", c: "bg-butter" },
-  { icon: Lock, title: "Bank-grade security", body: "SSO, role-based access, audit logs and encrypted backups. Hosted in-region.", c: "bg-sky" },
-  { icon: Plug, title: "200+ integrations", body: "Google, Microsoft 365, Slack, WhatsApp, Razorpay, Stripe, Shopify and an open API.", c: "bg-peach" },
-  { icon: Smartphone, title: "Mobile, for real", body: "Punch in, approve leave, check stock and update deals from iOS and Android.", c: "bg-mint" },
+  { icon: Workflow, title: "Built-in automations", body: "Won deal → invoice and project. Approved leave → attendance → payroll. PO received → stock and bill. Switch each one on or off.", c: "bg-butter" },
+  { icon: Lock, title: "Secure by design", body: "Role-based access, Google and Microsoft sign-in, an audit log on Enterprise, and every record scoped to your workspace.", c: "bg-sky" },
+  { icon: Plug, title: "Connects to your tools", body: "Slack, Teams, Google Chat, Google and Outlook calendars, Razorpay, Zapier, Make, n8n and a REST API.", c: "bg-peach" },
+  { icon: Smartphone, title: "Works on your phone", body: "Check in, apply for leave, approve your team and look up stock from any phone browser.", c: "bg-mint" },
 ];
 
 export function Platform() {

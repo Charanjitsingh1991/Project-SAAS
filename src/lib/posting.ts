@@ -10,6 +10,7 @@ import { accessFor } from "./trial";
 import { postJournal, reverseJournal } from "./ledger";
 import { taxOf } from "./money";
 import { nextNumber } from "./sequence";
+import { emitEvent } from "./integrations/events";
 import { defaultWarehouseId, moveStock } from "./stock";
 
 /*
@@ -206,6 +207,7 @@ export async function sendInvoice(ctx: Ctx, invoiceId: number): Promise<string |
 
   await db.update(schema.invoices).set({ status: "sent", sentAt: new Date() }).where(eq(schema.invoices.id, inv.id));
   await logActivity(ctx, { module: "finance", entityType: "invoice", entityId: inv.id, action: "sent", summary: `Sent invoice ${inv.number} to ${inv.customerName}` });
+  await emitEvent(ctx, "invoice.sent", { id: inv.id, number: inv.number, customer: inv.customerName, total: inv.total, due_date: inv.dueDate });
   return null;
 }
 
@@ -255,6 +257,7 @@ async function refreshInvoicePaid(ctx: Ctx, invoiceId: number) {
   const settled = paid + credited;
   const status = settled <= 0 ? "sent" : settled >= inv.total ? "paid" : "partial";
   await db.update(schema.invoices).set({ amountPaid: paid, amountCredited: credited, status }).where(eq(schema.invoices.id, invoiceId));
+  if (status === "paid" && inv.status !== "paid") await emitEvent(ctx, "invoice.paid", { id: inv.id, number: inv.number, customer: inv.customerName, total: inv.total });
 }
 
 /** Record a customer payment against a sent/partial invoice. Returns an error message or null. */
@@ -291,6 +294,7 @@ export async function recordPayment(
   });
   await refreshInvoicePaid(ctx, invoiceId);
   await logActivity(ctx, { module: "finance", entityType: "invoice", entityId: invoiceId, action: "payment", summary: `Recorded payment on ${inv.number}` });
+  await emitEvent(ctx, "payment.received", { id: pay.id, invoice_id: invoiceId, invoice_number: inv.number, customer: inv.customerName, amount: p.amount, method: p.method, date: p.date });
   return null;
 }
 
@@ -362,6 +366,7 @@ export async function createExpense(ctx: Ctx, e: ExpenseInput, opts: { post?: bo
       ],
     });
   }
+  await emitEvent(ctx, "expense.created", { id: row.id, description: e.description, category: e.category, total, status: e.status });
   return row.id;
 }
 
@@ -1014,6 +1019,7 @@ export async function receivePurchaseOrder(ctx: Ctx, poId: number, date = today(
     .set({ status: "received", receivedAt: new Date(), expenseId })
     .where(eq(schema.purchaseOrders.id, poId));
   await logActivity(ctx, { module: "inventory", entityType: "purchase_order", entityId: poId, action: "received", summary: `Received ${po.po.number} from ${po.vendor}` });
+  await emitEvent(ctx, "purchase_order.received", { id: poId, number: po.po.number, vendor: po.vendor, total: po.po.total });
   return null;
 }
 

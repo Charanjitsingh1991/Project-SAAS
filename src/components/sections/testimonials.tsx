@@ -6,29 +6,30 @@ import { ArrowLeft, ArrowRight } from "lucide-react";
 import { SectionLabel } from "../ui/reveal";
 import { cn } from "@/lib/utils";
 
+// Use cases describing real product behaviour (not customer quotes); swap in genuine testimonials after launch.
 const QUOTES = [
   {
-    quote: "We killed seven subscriptions in one quarter. Month-end used to take twelve days — now it's three, and nobody's crying over VLOOKUPs.",
-    name: "Rahul Mehta",
-    role: "CFO, Brightline Retail",
+    quote: "Invoices post to the ledger the moment they're sent, payments update the balance, and the P&L, balance sheet and GST or VAT summary are ready when the month ends.",
+    name: "Finance teams",
+    role: "Month-end close",
     c: "bg-butter",
   },
   {
-    quote: "A new hire used to touch five systems before their first day. Now the offer letter triggers everything — laptop, payroll, accounts.",
-    name: "Sarah O'Neil",
-    role: "Head of People, Vertex Labs",
+    quote: "Add a hire once. The onboarding checklist, leave balances, attendance and payroll all pick them up, and they check in, apply for leave and download payslips themselves.",
+    name: "People teams",
+    role: "Hire to payslip",
     c: "bg-mint",
   },
   {
-    quote: "My reps see stock and unpaid invoices right inside the deal. Win rate went up 23% in two quarters and I didn't run a single training.",
-    name: "Daniel Kim",
-    role: "VP Sales, Orbital Systems",
+    quote: "Reps see a customer's unpaid invoices and open tickets next to the deal, and winning it can draft the invoice and the project automatically.",
+    name: "Sales teams",
+    role: "Deal to invoice",
     c: "bg-sky",
   },
   {
-    quote: "We run four warehouses on it. Reorders draft themselves, and finance finally trusts the stock number.",
-    name: "Ananya Verma",
-    role: "COO, Kiran Distribution",
+    quote: "Stock moves when you invoice or receive a purchase order, costs stay weighted-average, and the reorder planner shows what runs out first.",
+    name: "Operations teams",
+    role: "Stock you can trust",
     c: "bg-peach",
   },
 ];
@@ -44,7 +45,7 @@ export function Testimonials() {
 
   return (
     <section className="mx-auto max-w-6xl px-5 py-28">
-      <SectionLabel index="04">In their words</SectionLabel>
+      <SectionLabel index="04">How teams use it</SectionLabel>
       <div className="mt-12 grid items-center gap-12 md:grid-cols-12">
         <div className="md:col-span-4">
           <h2 className="text-[clamp(2rem,4.4vw,3.6rem)] leading-[0.95] font-semibold tracking-tight">
@@ -100,8 +101,7 @@ export function Testimonials() {
               }}
               className={cn("absolute inset-0 flex cursor-grab flex-col rounded-[28px] border border-ink/10 p-8 active:cursor-grabbing md:p-10", q.c)}
             >
-              <span className="font-serif text-7xl leading-[0.5] text-ink/25">&ldquo;</span>
-              <blockquote className="mt-4 font-display text-xl leading-snug font-medium md:text-2xl">{q.quote}</blockquote>
+              <blockquote className="font-display text-xl leading-snug font-medium md:text-2xl">{q.quote}</blockquote>
               <figcaption className="mt-auto flex items-center gap-3 pt-6">
                 <span className="grid size-11 place-items-center rounded-full bg-ink font-mono text-sm text-paper">
                   {q.name

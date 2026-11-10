@@ -119,14 +119,14 @@ export function Hero() {
               <div className="flex -space-x-2">
                 {["bg-mint", "bg-butter", "bg-sky", "bg-peach"].map((c, i) => (
                   <span key={c} className={cn("grid size-9 place-items-center rounded-full border-2 border-paper font-mono text-xs", c)}>
-                    {["RM", "SO", "DK", "AV"][i]}
+                    {["HR", "CR", "FI", "IN"][i]}
                   </span>
                 ))}
               </div>
               <p className="text-sm text-ink-soft">
-                <b className="text-ink">2,500+ teams</b> switched
+                <b className="text-ink">One workspace</b> instead of
                 <br />
-                from 6+ tools on average
+                6+ separate tools
               </p>
             </div>
           </motion.div>

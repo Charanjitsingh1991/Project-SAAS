@@ -1,17 +1,20 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { ActionForm, Input, Select, SubmitButton } from "@/components/app/forms";
 import { Card, PageHeader, StatusBadge, Td, Th } from "@/components/app/ui";
 import { db, schema } from "@/db";
 import { invoiceDisplayStatus, lineTaxOption, taxSummary } from "@/lib/finance-utils";
 import { addDaysYmd, daysBetween, formatDate, formatDateTime, formatMoney, todayYmd } from "@/lib/format";
 import { amountInWords, fromMinor } from "@/lib/money";
+import { paymentLinkMessage, whatsappNumber, whatsappUrl } from "@/lib/razorpay";
 import { hasFeature, packFor, requireWorkspace } from "@/lib/tenancy";
 import { deleteDraftInvoice, deletePaymentAction, recordPaymentAction, sendInvoiceAction, voidInvoiceAction } from "../../actions";
 import { issueCreditNoteAction, refundAction } from "../../credit-notes/actions";
 import { createScheduleAction } from "../../recurring/actions";
+import { CopyLinkButton } from "./copy-link-button";
+import { cancelPaymentLinkAction, createPaymentLinkAction, emailPaymentLinkAction } from "./payment-link-actions";
 import { ConfirmAction } from "../../_components/confirm-action";
 import { CreditNoteForm } from "../../_components/credit-note-form";
 import { PrintButton } from "../../_components/print-button";
@@ -48,6 +51,24 @@ export default async function InvoicePage({ params }: PageProps<"/app/finance/in
     inv.dealId ? db.select({ id: schema.deals.id, title: schema.deals.title }).from(schema.deals).where(and(eq(schema.deals.id, inv.dealId), eq(schema.deals.orgId, orgId))).limit(1) : Promise.resolve([]),
     inv.projectId ? db.select({ id: schema.projects.id, name: schema.projects.name }).from(schema.projects).where(and(eq(schema.projects.id, inv.projectId), eq(schema.projects.orgId, orgId))).limit(1) : Promise.resolve([]),
   ]);
+
+  const [rzp] = await db
+    .select({ id: schema.orgIntegrations.id })
+    .from(schema.orgIntegrations)
+    .where(and(eq(schema.orgIntegrations.orgId, orgId), eq(schema.orgIntegrations.provider, "razorpay"), eq(schema.orgIntegrations.active, true)))
+    .limit(1);
+  const [payLink] = rzp
+    ? await db
+        .select()
+        .from(schema.invoicePaymentLinks)
+        .where(and(eq(schema.invoicePaymentLinks.invoiceId, inv.id), eq(schema.invoicePaymentLinks.orgId, orgId)))
+        .orderBy(desc(schema.invoicePaymentLinks.id))
+        .limit(1)
+    : [];
+  const [linkCompany] =
+    rzp && inv.companyId
+      ? await db.select({ phone: schema.companies.phone }).from(schema.companies).where(and(eq(schema.companies.id, inv.companyId), eq(schema.companies.orgId, orgId))).limit(1)
+      : [];
 
   const cur = ws.org.currency;
   const today = todayYmd();
@@ -277,6 +298,56 @@ export default async function InvoicePage({ params }: PageProps<"/app/finance/in
         </article>
 
         <aside className="space-y-6 print:hidden">
+          {rzp && open && balance > 0 && (
+            <Card title="Online payment">
+              {payLink && payLink.status !== "cancelled" ? (
+                <div className="space-y-3 text-sm">
+                  <p className="flex items-center justify-between gap-2">
+                    <span className="font-medium tabular-nums">{formatMoney(payLink.amount, cur)}</span>
+                    <StatusBadge value={payLink.status} />
+                  </p>
+                  <a href={payLink.url} target="_blank" rel="noreferrer" className="block text-xs break-all text-ink-soft underline">
+                    {payLink.url}
+                  </a>
+                  {payLink.status === "created" && (
+                    <div className="flex flex-wrap items-start gap-2">
+                      <CopyLinkButton text={payLink.url} />
+                      {inv.customerEmail && (
+                        <ConfirmAction action={emailPaymentLinkAction} fields={{ invoiceId: inv.id }}>
+                          Email to customer
+                        </ConfirmAction>
+                      )}
+                      <a
+                        href={whatsappUrl(
+                          paymentLinkMessage({ customerName: inv.customerName, invoiceNumber: inv.number, amountText: formatMoney(payLink.amount, cur), orgName: ws.org.name, url: payLink.url }),
+                          whatsappNumber(linkCompany?.phone, ws.org.country === "AE" ? "971" : "91"),
+                        )}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex h-9 items-center rounded-full border border-ink/20 px-4 text-sm font-medium hover:border-ink"
+                      >
+                        Share on WhatsApp
+                      </a>
+                      <ConfirmAction action={cancelPaymentLinkAction} fields={{ invoiceId: inv.id }} confirm="Cancel this payment link?" variant="danger">
+                        Cancel link
+                      </ConfirmAction>
+                    </div>
+                  )}
+                  {payLink.status === "created" && payLink.amount !== balance && (
+                    <p className="text-xs text-ink-mute">The balance has changed since this link was made. Replace it to charge {formatMoney(balance, cur)}.</p>
+                  )}
+                </div>
+              ) : (
+                <p className="text-sm text-ink-soft">Let the customer pay {formatMoney(balance, cur)} online. The payment is recorded automatically.</p>
+              )}
+              <div className="mt-3">
+                <ConfirmAction action={createPaymentLinkAction} fields={{ invoiceId: inv.id }} variant="ink">
+                  {payLink && payLink.status === "created" ? "Replace payment link" : "Create payment link"}
+                </ConfirmAction>
+              </div>
+            </Card>
+          )}
+
           {open && balance > 0 && (
             <Card title="Record payment">
               <ActionForm action={recordPaymentAction} className="space-y-3">

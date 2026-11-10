@@ -13,7 +13,9 @@ export type Feature =
   | "supportPortal"
   | "auditLog"
   | "payrollModule"
-  | "analyticsModule";
+  | "analyticsModule"
+  | "copilot"
+  | "developerApi";
 
 export const ALL_MODULES: ModuleKey[] = ["hrm", "payroll", "crm", "finance", "inventory", "projects", "helpdesk", "analytics"];
 /** Modules a Starter workspace can choose from (payroll & analytics need Growth). */
@@ -46,6 +48,8 @@ const GROWTH_FEATURES: Feature[] = [
   "supportPortal",
   "payrollModule",
   "analyticsModule",
+  "copilot",
+  "developerApi",
 ];
 
 export const PLANS: Record<PlanKey, PlanDef> = {
@@ -77,6 +81,7 @@ export const PLANS: Record<PlanKey, PlanDef> = {
       "Recruitment, performance & expense claims",
       "Recurring invoices & bank reconciliation",
       "Customer support portal & web-to-lead forms",
+      "Ask AI, webhooks (Zapier, Make, n8n) & REST API",
       "Unlimited users, up to 5 warehouses",
     ],
   },

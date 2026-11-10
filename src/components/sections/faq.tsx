@@ -13,7 +13,7 @@ const FAQS = [
   },
   {
     q: "How long does migration take?",
-    a: "Typically 1–3 weeks. We import from spreadsheets, Tally, Zoho, QuickBooks, HubSpot, Salesforce, Keka and SAP Business One for free, and a human checks the mapping with you.",
+    a: "Most teams are live in 1–3 weeks. Export employees, contacts, companies and products from spreadsheets, Tally, Zoho, QuickBooks, HubSpot or Keka as CSV and import them in a few clicks; we're happy to help you map the columns.",
   },
   {
     q: "Does it handle Indian and UAE tax and payroll?",
@@ -21,11 +21,11 @@ const FAQS = [
   },
   {
     q: "Where is our data stored?",
-    a: "In a managed cloud database with encryption in transit and at rest, regular backups and an audit log on Enterprise. You can export your data as CSV at any time.",
+    a: "In a managed cloud database, over encrypted connections, with every record scoped to your workspace. Enterprise adds a full audit log, and you can export your data as CSV at any time.",
   },
   {
     q: "Do you offer on-premise deployment?",
-    a: "Enterprise customers can choose a dedicated single-tenant cloud. Fully on-premise installs are available for regulated industries on request.",
+    a: "Not at the moment: saasmodels.tech runs as a managed cloud service. If you have specific data-residency requirements, talk to us before you sign up.",
   },
 ];
 

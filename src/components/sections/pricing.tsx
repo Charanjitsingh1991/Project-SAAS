@@ -15,7 +15,7 @@ const PLANS = [
     yearly: 7,
     cta: "Start free",
     href: "/signup",
-    features: ["HRM + CRM", "Up to 25 users", "Mobile apps", "Email support"],
+    features: ["Any 3 core modules", "Up to 25 users", "Works on any phone browser", "Email support"],
   },
   {
     name: "Growth",
@@ -25,16 +25,16 @@ const PLANS = [
     cta: "Start free",
     href: "/signup",
     featured: true,
-    features: ["Everything in Starter", "Finance, Inventory, Payroll", "Workflows + Copilot", "Unlimited users", "Priority support"],
+    features: ["Everything in Starter", "Finance, Inventory, Payroll", "Automations + Ask AI", "Webhooks & REST API", "Unlimited users"],
   },
   {
     name: "Enterprise",
-    blurb: "Multi-entity groups with serious compliance needs.",
+    blurb: "For larger teams that need oversight and hands-on help.",
     monthly: null,
     yearly: null,
     cta: "Talk to sales",
     href: "/#contact",
-    features: ["All 8 modules", "Multi-entity & currency", "SSO / SAML, audit logs", "Dedicated success manager", "99.99% SLA"],
+    features: ["Everything in Growth", "Full audit log with export", "Unlimited workspaces & warehouses", "Dedicated success manager"],
   },
 ];
 
