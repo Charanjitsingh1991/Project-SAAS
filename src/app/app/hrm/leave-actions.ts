@@ -9,7 +9,8 @@ import { ctxOf, logActivity } from "@/lib/activity";
 import type { FormState } from "@/lib/definitions";
 import { formObject } from "@/lib/format";
 import { LEAVE_COLORS } from "@/lib/hrm";
-import { decideLeave, submitLeave } from "@/lib/hrm-data";
+import { authorizeDecision, decideLeave, submitLeave } from "@/lib/hrm-data";
+import { notifyLeaveDecided, notifyLeaveSubmitted } from "@/lib/notify";
 import { requireWorkspace } from "@/lib/tenancy";
 
 const Id = z.string().regex(/^\d+$/, "Invalid selection.");
@@ -37,6 +38,7 @@ export async function applyLeaveForEmployee(_: FormState, fd: FormData): Promise
     reason: v.reason,
   });
   if (!res.ok) return { errors: res.errors };
+  await notifyLeaveSubmitted(ws.org.id, res.id);
   refresh();
   return { ok: true, message: `Request created for ${res.days} day(s). It is pending approval.` };
 }
@@ -45,8 +47,20 @@ export async function decideLeaveAction(fd: FormData) {
   const ws = await requireWorkspace({ module: "hrm" });
   const decision = String(fd.get("decision"));
   if (decision !== "approve" && decision !== "reject" && decision !== "cancel") return;
-  const res = await decideLeave(ctxOf(ws), ws.org.automations, Number(fd.get("id")), decision);
+  const id = Number(fd.get("id"));
+  if (decision !== "cancel") {
+    const [req] = await db
+      .select({ employeeId: schema.leaveRequests.employeeId })
+      .from(schema.leaveRequests)
+      .where(and(eq(schema.leaveRequests.id, id), eq(schema.leaveRequests.orgId, ws.org.id)))
+      .limit(1);
+    if (!req) redirect(`/app/hrm/leave?error=${encodeURIComponent("Request not found.")}`);
+    const auth = await authorizeDecision(ws.org.id, ws.user, true, req.employeeId);
+    if (!auth.ok) redirect(`/app/hrm/leave?error=${encodeURIComponent(auth.message)}`);
+  }
+  const res = await decideLeave(ctxOf(ws), ws.org.automations, id, decision);
   if (!res.ok) redirect(`/app/hrm/leave?error=${encodeURIComponent(res.message)}`);
+  if (decision !== "cancel") await notifyLeaveDecided(ws.org.id, id);
   refresh();
 }
 

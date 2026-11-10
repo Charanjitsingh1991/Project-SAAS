@@ -9,8 +9,10 @@ import type { FormState } from "@/lib/definitions";
 import { parseClaim, submitClaim, withdrawClaim } from "@/lib/claims";
 import { formatMoney, formObject, todayYmd } from "@/lib/format";
 import { hhmm } from "@/lib/hrm";
-import { decideLeave, resolveMyEmployee, submitLeave, upsertAttendance } from "@/lib/hrm-data";
-import { packFor, planModules, requireWorkspace } from "@/lib/tenancy";
+import { authorizeDecision, decideLeave, decideRegularization, resolveMyEmployee, submitLeave, submitRegularization, upsertAttendance } from "@/lib/hrm-data";
+import { notifyLeaveDecided, notifyLeaveSubmitted, notifyRegularizationDecided, notifyRegularizationSubmitted } from "@/lib/notify";
+import { canUseModule, packFor, planModules, requireWorkspace } from "@/lib/tenancy";
+import { redirect } from "next/navigation";
 
 async function me() {
   const ws = await requireWorkspace();
@@ -82,6 +84,7 @@ export async function applyMyLeave(_: FormState, fd: FormData): Promise<FormStat
     reason: v.reason,
   });
   if (!res.ok) return { errors: res.errors };
+  await notifyLeaveSubmitted(ws.org.id, res.id);
   refresh();
   return { ok: true, message: `Request submitted for ${res.days} day(s). Your manager or HR will review it.` };
 }
@@ -116,5 +119,85 @@ export async function cancelMyLeave(fd: FormData) {
   const { ws, emp } = await me();
   if (!emp) return;
   await decideLeave(ctxOf(ws), ws.org.automations, Number(fd.get("id")), "cancel", { onlyEmployeeId: emp.id });
+  refresh();
+}
+
+/* ───────── Attendance regularisation (employee side) ───────── */
+
+export async function requestRegularization(_: FormState, fd: FormData): Promise<FormState> {
+  const { ws, emp } = await me();
+  if (!emp) return { message: "Your profile isn't linked to an active employee record." };
+  const parsed = z
+    .object({
+      date: z.string().min(1, "Pick a date."),
+      requestedStatus: z.string().min(1, "Pick a status."),
+      checkIn: z.string().optional(),
+      checkOut: z.string().optional(),
+      reason: z.string().min(3, "Give a short reason.").max(500),
+    })
+    .safeParse(formObject(fd));
+  if (!parsed.success) return { errors: z.flattenError(parsed.error).fieldErrors };
+  const v = parsed.data;
+  const res = await submitRegularization(ctxOf(ws), {
+    employeeId: emp.id,
+    date: v.date,
+    requestedStatus: v.requestedStatus,
+    checkIn: v.checkIn ?? "",
+    checkOut: v.checkOut ?? "",
+    reason: v.reason,
+    today: todayYmd(),
+  });
+  if (!res.ok) return { errors: res.errors };
+  await notifyRegularizationSubmitted(ws.org.id, res.id);
+  refresh();
+  return { ok: true, message: "Correction requested. Your manager or HR will review it." };
+}
+
+export async function cancelMyRegularization(fd: FormData) {
+  const { ws, emp } = await me();
+  if (!emp) return;
+  await decideRegularization(ctxOf(ws), Number(fd.get("id")), "cancel", { onlyEmployeeId: emp.id });
+  refresh();
+}
+
+/* ───────── Team approvals (reporting manager, or HRM roles) ───────── */
+
+const back = (msg: string): never => redirect(`/app/me?error=${encodeURIComponent(msg)}`);
+
+export async function decideTeamLeave(fd: FormData) {
+  const ws = await requireWorkspace();
+  const decision = String(fd.get("decision"));
+  if (decision !== "approve" && decision !== "reject") return;
+  const id = Number(fd.get("id"));
+  const [req] = await db
+    .select({ employeeId: schema.leaveRequests.employeeId, status: schema.leaveRequests.status })
+    .from(schema.leaveRequests)
+    .where(and(eq(schema.leaveRequests.id, id), eq(schema.leaveRequests.orgId, ws.org.id)))
+    .limit(1);
+  if (!req) return back("Request not found.");
+  const auth = await authorizeDecision(ws.org.id, ws.user, canUseModule(ws, "hrm"), req.employeeId, req.status);
+  if (!auth.ok) return back(auth.message);
+  const res = await decideLeave(ctxOf(ws), ws.org.automations, id, decision);
+  if (!res.ok) return back(res.message);
+  await notifyLeaveDecided(ws.org.id, id);
+  refresh();
+}
+
+export async function decideTeamRegularization(fd: FormData) {
+  const ws = await requireWorkspace();
+  const decision = String(fd.get("decision"));
+  if (decision !== "approve" && decision !== "reject") return;
+  const id = Number(fd.get("id"));
+  const [req] = await db
+    .select({ employeeId: schema.attendanceRegularizations.employeeId, status: schema.attendanceRegularizations.status })
+    .from(schema.attendanceRegularizations)
+    .where(and(eq(schema.attendanceRegularizations.id, id), eq(schema.attendanceRegularizations.orgId, ws.org.id)))
+    .limit(1);
+  if (!req) return back("Request not found.");
+  const auth = await authorizeDecision(ws.org.id, ws.user, canUseModule(ws, "hrm"), req.employeeId, req.status);
+  if (!auth.ok) return back(auth.message);
+  const res = await decideRegularization(ctxOf(ws), id, decision, { note: String(fd.get("note") ?? "") });
+  if (!res.ok) return back(res.message);
+  await notifyRegularizationDecided(ws.org.id, id);
   refresh();
 }

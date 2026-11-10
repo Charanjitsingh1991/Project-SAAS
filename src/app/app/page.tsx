@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 import { and, desc, eq, gt, inArray, lt, ne, sql } from "drizzle-orm";
 import Link from "next/link";
+import { Suspense } from "react";
 import { ArrowUpRight, Lock, Sparkles, Zap } from "lucide-react";
 import { loadSampleData } from "@/app/app/actions";
+import { AnnouncementsFeed } from "@/components/app/announcements-feed";
 import { SubmitButton } from "@/components/app/forms";
 import { Card, EmptyState, PageHeader, Stat } from "@/components/app/ui";
 import { db, schema } from "@/db";
@@ -106,6 +108,10 @@ export default async function OverviewPage(props: PageProps<"/app">) {
           </form>
         </div>
       )}
+
+      <Suspense fallback={null}>
+        <AnnouncementsFeed orgId={orgId} limit={5} />
+      </Suspense>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {tiles

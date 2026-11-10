@@ -42,5 +42,4 @@ next-env.d.ts
 
 .hoplite/
 local.db*
-/drizzle/meta
 !.env.example

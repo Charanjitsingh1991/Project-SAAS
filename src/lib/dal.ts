@@ -18,12 +18,16 @@ export async function getCurrentUser() {
       company: schema.users.company,
       phone: schema.users.phone,
       createdAt: schema.users.createdAt,
+      passwordChangedAt: schema.users.passwordChangedAt,
     })
     .from(schema.users)
     .where(eq(schema.users.id, session.userId))
     .limit(1);
 
-  return user ?? null;
+  if (!user) return null;
+  // A password change revokes every session issued before it.
+  if (user.passwordChangedAt && (session.iat ?? 0) < Math.floor(user.passwordChangedAt.getTime() / 1000)) return null;
+  return { id: user.id, name: user.name, email: user.email, company: user.company, phone: user.phone, createdAt: user.createdAt };
 }
 
 export async function requireUser() {

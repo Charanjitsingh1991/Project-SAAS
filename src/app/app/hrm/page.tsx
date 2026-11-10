@@ -1,13 +1,14 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { asc, eq } from "drizzle-orm";
-import { Download, Plus, Search } from "lucide-react";
-import { Input, Select } from "@/components/app/forms";
+import { and, asc, eq, gt, isNull } from "drizzle-orm";
+import { Download, Plus, Search, Upload } from "lucide-react";
+import { ActionForm, Input, Select, SubmitButton } from "@/components/app/forms";
 import { Badge, Card, EmptyState, PageHeader, Stat, StatusBadge, Table, Td, Th } from "@/components/app/ui";
 import { db, schema } from "@/db";
 import { addDaysYmd, formatDate, initials, todayYmd } from "@/lib/format";
 import { attritionPct, expiryAlerts, expiryText } from "@/lib/hrm";
 import { packFor, requireWorkspace } from "@/lib/tenancy";
+import { inviteAllToPortal } from "./portal-actions";
 import { hrmTabs } from "./tabs";
 
 export const metadata: Metadata = { title: "People" };
@@ -20,10 +21,16 @@ export default async function HrmDirectoryPage({ searchParams }: { searchParams:
   const orgId = ws.org.id;
   const today = todayYmd();
 
-  const [emps, depts] = await Promise.all([
+  const [emps, depts, pendingInvites] = await Promise.all([
     db.select().from(schema.employees).where(eq(schema.employees.orgId, orgId)).orderBy(asc(schema.employees.code)),
     db.select().from(schema.departments).where(eq(schema.departments.orgId, orgId)).orderBy(asc(schema.departments.name)),
+    db
+      .select({ email: schema.invites.email })
+      .from(schema.invites)
+      .where(and(eq(schema.invites.orgId, orgId), isNull(schema.invites.acceptedAt), gt(schema.invites.expiresAt, new Date()))),
   ]);
+  const pendingEmails = new Set(pendingInvites.map((i) => i.email.toLowerCase()));
+  const invitable = new Set(emps.filter((e) => e.status === "active" && !e.userId && e.email && !pendingEmails.has(e.email.toLowerCase())).map((e) => e.email!.toLowerCase())).size;
   const deptName = new Map(depts.map((d) => [d.id, d.name]));
   const empName = new Map(emps.map((e) => [e.id, e.name]));
 
@@ -61,6 +68,9 @@ export default async function HrmDirectoryPage({ searchParams }: { searchParams:
             <a href="/api/export/employees" className="inline-flex h-10 items-center gap-2 rounded-full border border-line px-4 text-sm font-medium hover:border-ink">
               <Download className="size-4" /> Export CSV
             </a>
+            <Link href="/app/hrm/import" className="inline-flex h-10 items-center gap-2 rounded-full border border-line px-4 text-sm font-medium hover:border-ink">
+              <Upload className="size-4" /> Import CSV
+            </Link>
             <Link href="/app/hrm/new" className="inline-flex h-10 items-center gap-2 rounded-full bg-ink px-4 text-sm font-medium text-paper hover:bg-ink/90">
               <Plus className="size-4" /> Add employee
             </Link>
@@ -74,6 +84,17 @@ export default async function HrmDirectoryPage({ searchParams }: { searchParams:
         <Stat label="On notice" value={onNotice} tone="butter" />
         <Stat label="Attrition (12 mo)" value={`${attrition}%`} hint={`${exits12} exit${exits12 === 1 ? "" : "s"}`} tone="peach" />
       </div>
+
+      {invitable > 0 && (
+        <Card title="Employee portal" className="mb-6">
+          <ActionForm action={inviteAllToPortal} resetOnSuccess={false} className="flex flex-wrap items-center gap-3">
+            <p className="text-sm text-ink-soft">
+              {invitable} active employee{invitable === 1 ? " has" : "s have"} an email but no portal access or pending invite.
+            </p>
+            <SubmitButton variant="outline">Invite all to portal</SubmitButton>
+          </ActionForm>
+        </Card>
+      )}
 
       {alertsByEmp.size > 0 && (
         <Card title={`Document renewals · ${alertsByEmp.size} employee${alertsByEmp.size === 1 ? "" : "s"}`} className="mb-6">

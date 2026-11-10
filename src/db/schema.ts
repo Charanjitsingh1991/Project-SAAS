@@ -28,6 +28,8 @@ export const users = sqliteTable("users", {
   company: text("company"),
   phone: text("phone"), // E.164, e.g. +971501234567
   passwordHash: text("password_hash").notNull(),
+  /** Sessions issued before this moment are rejected (set on password change/reset). */
+  passwordChangedAt: integer("password_changed_at", { mode: "timestamp" }),
   createdAt: createdAt(),
 });
 
@@ -1417,4 +1419,87 @@ export const employeeFiles = sqliteTable(
     createdAt: createdAt(),
   },
   (t) => [index("employee_files_emp_idx").on(t.orgId, t.employeeId)],
+);
+
+// --- Password resets ---
+/** One-time reset links; only a SHA-256 hash of the token is stored. */
+export const passwordResets = sqliteTable(
+  "password_resets",
+  {
+    id: id(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull().unique(),
+    expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+    usedAt: integer("used_at", { mode: "timestamp" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("password_resets_user").on(t.userId)],
+);
+
+// --- Attendance regularisation ---
+export const REGULARIZATION_STATUSES = ["pending", "approved", "rejected", "cancelled"] as const;
+
+/** Employee request to correct a day's attendance; approval writes the attendance row. */
+export const attendanceRegularizations = sqliteTable(
+  "attendance_regularizations",
+  {
+    id: id(),
+    orgId: orgId(),
+    employeeId: integer("employee_id")
+      .notNull()
+      .references(() => employees.id, { onDelete: "cascade" }),
+    date: text("date").notNull(),
+    requestedStatus: text("requested_status", { enum: ATTENDANCE_STATUSES }).notNull().default("present"),
+    checkIn: text("check_in"),
+    checkOut: text("check_out"),
+    reason: text("reason").notNull(),
+    status: text("status", { enum: REGULARIZATION_STATUSES }).notNull().default("pending"),
+    decidedBy: integer("decided_by").references(() => users.id, { onDelete: "set null" }),
+    decidedAt: integer("decided_at", { mode: "timestamp" }),
+    decisionNote: text("decision_note"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("att_reg_org_status").on(t.orgId, t.status), index("att_reg_emp").on(t.employeeId, t.date)],
+);
+
+// --- Announcements ---
+export const announcements = sqliteTable(
+  "announcements",
+  {
+    id: id(),
+    orgId: orgId(),
+    title: text("title").notNull(),
+    body: text("body").notNull(),
+    pinned: integer("pinned", { mode: "boolean" }).notNull().default(false),
+    /** Hidden from feeds after this date (YYYY-MM-DD); null = no expiry. */
+    expiresOn: text("expires_on"),
+    postedBy: integer("posted_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("announcements_org").on(t.orgId, t.createdAt)],
+);
+
+// --- HR letters ---
+export const LETTER_KINDS = ["offer", "appointment", "experience", "relieving", "salary_certificate", "noc"] as const;
+
+/** Issued HR letters; the rendered text is frozen at issue time. */
+export const hrLetters = sqliteTable(
+  "hr_letters",
+  {
+    id: id(),
+    orgId: orgId(),
+    employeeId: integer("employee_id")
+      .notNull()
+      .references(() => employees.id, { onDelete: "cascade" }),
+    kind: text("kind", { enum: LETTER_KINDS }).notNull(),
+    number: text("number").notNull(),
+    issuedOn: text("issued_on").notNull(),
+    subject: text("subject").notNull(),
+    body: text("body").notNull(),
+    issuedBy: integer("issued_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("hr_letters_emp").on(t.orgId, t.employeeId), uniqueIndex("hr_letters_org_number").on(t.orgId, t.number)],
 );

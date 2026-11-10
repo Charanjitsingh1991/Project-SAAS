@@ -2,10 +2,12 @@
 
 import { and, eq, isNull, notInArray, sql } from "drizzle-orm";
 import { refresh } from "next/cache";
+import { redirect } from "next/navigation";
 import { db, schema } from "@/db";
 import { ctxOf, logActivity } from "@/lib/activity";
 import { isValidYmd, isWeekend } from "@/lib/hrm";
-import { holidaySet, upsertAttendance } from "@/lib/hrm-data";
+import { authorizeDecision, decideRegularization, holidaySet, upsertAttendance } from "@/lib/hrm-data";
+import { notifyRegularizationDecided } from "@/lib/notify";
 import { weekendOf } from "@/lib/countries";
 import { requireWorkspace } from "@/lib/tenancy";
 
@@ -65,5 +67,26 @@ export async function markAllPresent(fd: FormData) {
       .onConflictDoNothing();
     await logActivity(ctxOf(ws), { module: "hrm", entityType: "attendance", action: "bulk_present", summary: `Marked ${todo.length} employee(s) present on ${date}` });
   }
+  refresh();
+}
+
+/** HR decision on a regularisation request (approve/reject with an optional note). */
+export async function decideRegularizationAction(fd: FormData) {
+  const ws = await requireWorkspace({ module: "hrm" });
+  const decision = String(fd.get("decision"));
+  if (decision !== "approve" && decision !== "reject") return;
+  const id = Number(fd.get("id"));
+  const back = (msg: string): never => redirect(`/app/hrm/attendance?view=requests&error=${encodeURIComponent(msg)}`);
+  const [req] = await db
+    .select({ employeeId: schema.attendanceRegularizations.employeeId })
+    .from(schema.attendanceRegularizations)
+    .where(and(eq(schema.attendanceRegularizations.id, id), eq(schema.attendanceRegularizations.orgId, ws.org.id)))
+    .limit(1);
+  if (!req) return back("Request not found.");
+  const auth = await authorizeDecision(ws.org.id, ws.user, true, req.employeeId);
+  if (!auth.ok) return back(auth.message);
+  const res = await decideRegularization(ctxOf(ws), id, decision, { note: String(fd.get("note") ?? "") });
+  if (!res.ok) return back(res.message);
+  await notifyRegularizationDecided(ws.org.id, id);
   refresh();
 }

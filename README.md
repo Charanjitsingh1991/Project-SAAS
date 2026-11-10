@@ -93,14 +93,16 @@ Once connected:
 - A cancelled subscription deactivates the workspace after the period ends.
 
 ## Production (Vercel + Turso)
-1. Create a Turso database: `turso db create saasmodels`, then `turso db show saasmodels --url` and `turso db tokens create saasmodels`.
-2. Create the tables once from your machine: `DATABASE_URL=libsql://… DATABASE_AUTH_TOKEN=… npm run db:push`. Re-run it after schema changes.
-3. In Vercel, import the GitHub repository (the framework preset is Next.js). Under **Settings → Environment Variables**, set:
-   - `DATABASE_URL`, `DATABASE_AUTH_TOKEN`
+1. **Database.** Either install **Turso** from the Vercel Marketplace (Storage → Create → Turso), which adds `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` to the project, or create a database at turso.tech and add `DATABASE_URL` + `DATABASE_AUTH_TOKEN` yourself. Both naming styles work.
+2. **Tables.** Nothing to run by hand: `npm run build` first runs `scripts/migrate.mjs`, which applies the SQL migrations in `drizzle/` to the database on every deploy. To move existing local data instead, see `turso db import`.
+3. In Vercel, import the GitHub repository (framework preset: Next.js). Under **Settings → Environment Variables**, set:
    - `SESSION_SECRET` (`openssl rand -base64 32`)
    - `CRON_SECRET` (any random string; Vercel Cron sends it to `/api/cron/recurring-invoices`)
    - `ADMIN_EMAILS`, `APP_TIMEZONE`, `APP_URL` (your production URL)
+   - `RESEND_API_KEY` and `EMAIL_FROM` for email (invites, password reset, notifications). Verify your sending domain in Resend first.
    - optional: the `STRIPE_*` variables (billing pages work in trial mode without them)
-4. Deploy. `vercel.json` schedules the daily recurring-invoice run at 00:30 UTC. A deployment without `DATABASE_URL` fails with a clear error, because Vercel can't keep a local SQLite file.
+4. Deploy. `vercel.json` schedules the daily recurring-invoice run at 00:30 UTC. A deployment without a database fails with a clear error, because Vercel can't keep a local SQLite file.
+
+After changing `src/db/schema.ts`, run `npm run db:generate` and commit the new file in `drizzle/`.
 
 `npm run db:studio` opens Drizzle Studio for browsing data.

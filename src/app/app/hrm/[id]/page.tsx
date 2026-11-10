@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { and, asc, desc, eq, gte, lte, ne } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, isNull, lte, ne, sql } from "drizzle-orm";
 import { ActionButton, ActionForm, Input, Select, SubmitButton } from "@/components/app/forms";
 import { Badge, Card, EmptyState, PageHeader, StatusBadge, Table, Td, Th, type Tone } from "@/components/app/ui";
 import { db, schema } from "@/db";
@@ -15,6 +15,7 @@ import { addTask, deleteTask, linkUser, markExited, reactivate, startNotice, tog
 import { CompFields, JobFields, PersonalFields, StatutoryFields, annualPayLabel } from "../_components/employee-fields";
 import { MiniCalendar } from "../_components/mini-calendar";
 import { DocumentsTab } from "./documents-tab";
+import { inviteToPortal } from "./portal-actions";
 
 export const metadata: Metadata = { title: "Employee" };
 
@@ -60,6 +61,21 @@ export default async function EmployeePage({ params, searchParams }: { params: P
   const reports = await db.select({ id: schema.employees.id }).from(schema.employees).where(and(eq(schema.employees.orgId, orgId), eq(schema.employees.managerId, emp.id), ne(schema.employees.status, "exited")));
 
   const [linked] = emp.userId ? await db.select({ name: schema.users.name, email: schema.users.email }).from(schema.users).where(eq(schema.users.id, emp.userId)).limit(1) : [];
+  const [pendingInvite] =
+    !emp.userId && emp.email
+      ? await db
+          .select({ id: schema.invites.id })
+          .from(schema.invites)
+          .where(
+            and(
+              eq(schema.invites.orgId, orgId),
+              sql`lower(${schema.invites.email}) = ${emp.email.toLowerCase()}`,
+              isNull(schema.invites.acceptedAt),
+              gt(schema.invites.expiresAt, new Date()),
+            ),
+          )
+          .limit(1)
+      : [];
 
   return (
     <>
@@ -77,9 +93,14 @@ export default async function EmployeePage({ params, searchParams }: { params: P
           </>
         }
         actions={
-          <Link href="/app/hrm" className="text-sm text-ink-soft hover:text-ink">
-            ← Directory
-          </Link>
+          <>
+            <Link href={`/app/hrm/letters/new?employee=${emp.id}`} className="inline-flex h-10 items-center rounded-full border border-line px-4 text-sm font-medium hover:border-ink">
+              Issue letter
+            </Link>
+            <Link href="/app/hrm" className="text-sm text-ink-soft hover:text-ink">
+              ← Directory
+            </Link>
+          </>
         }
         tabs={TABS.map(([k, label]) => ({ href: `/app/hrm/${emp.id}?tab=${k}`, label, active: k === tab }))}
       />
@@ -140,6 +161,18 @@ export default async function EmployeePage({ params, searchParams }: { params: P
                   "Not linked. Link a workspace member so they can use My space (check-in, leave, payslips)."
                 )}
               </p>
+              {linked ? (
+                <p className="mb-3 text-sm font-medium text-ink">Has portal access</p>
+              ) : emp.email && emp.status !== "exited" ? (
+                <ActionForm action={inviteToPortal} resetOnSuccess={false} className="mb-4 space-y-2 border-b border-line/70 pb-4">
+                  <input type="hidden" name="id" value={emp.id} />
+                  {pendingInvite && <p className="text-sm font-medium text-ink">Invited — pending</p>}
+                  <SubmitButton variant="outline">{pendingInvite ? "Resend invite" : "Invite to portal"}</SubmitButton>
+                  <p className="text-xs text-ink-mute">Sends {emp.email} a link to set a password and open My space.</p>
+                </ActionForm>
+              ) : (
+                !emp.email && <p className="mb-3 text-xs text-ink-mute">Add a work email on the Overview tab to invite this employee to the portal.</p>
+              )}
               <AccountLink empId={emp.id} orgId={orgId} current={emp.userId} />
             </Card>
           </div>

@@ -2,9 +2,10 @@ import "server-only";
 import { and, eq, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 
-type SequenceKey = "invoice" | "po" | "ticket" | "employee" | "project";
+type SequenceKey = "invoice" | "po" | "ticket" | "employee" | "project" | "letter";
 
 const FORMAT: Record<SequenceKey, { prefix: string; start: number; pad: number }> = {
+  letter: { prefix: "LTR-", start: 1, pad: 4 },
   invoice: { prefix: "INV-", start: 1001, pad: 0 },
   po: { prefix: "PO-", start: 1, pad: 4 },
   ticket: { prefix: "TCK-", start: 1001, pad: 0 },

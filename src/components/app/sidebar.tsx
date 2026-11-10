@@ -95,6 +95,9 @@ function NavBody({ ws }: { ws: ActiveWorkspace }) {
           <p className="truncate text-sm font-medium">{ws.user.name}</p>
           <p className="truncate text-xs text-ink-mute">{ws.user.email}</p>
         </div>
+        <Link href="/app/account" aria-label="Account" title="Account" className="grid size-8 place-items-center rounded-full hover:bg-paper-2">
+          <Settings2 className="size-4" />
+        </Link>
         <form action={logout}>
           <button aria-label="Log out" title="Log out" className="grid size-8 place-items-center rounded-full hover:bg-paper-2">
             <LogOut className="size-4" />

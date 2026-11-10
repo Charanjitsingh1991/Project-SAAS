@@ -63,7 +63,15 @@ export function AuthForm({
           type={show ? "text" : "password"}
           errors={state?.errors?.password}
           autoComplete={isSignup ? "new-password" : "current-password"}
-          hint={isSignup ? <span className="text-xs text-ink-mute">8+ chars, a letter & a number</span> : undefined}
+          hint={
+            isSignup ? (
+              <span className="text-xs text-ink-mute">8+ chars, a letter & a number</span>
+            ) : (
+              <Link href="/forgot-password" className="text-xs font-normal text-ink-soft underline underline-offset-4 hover:text-ink">
+                Forgot password?
+              </Link>
+            )
+          }
         />
         <button
           type="button"
