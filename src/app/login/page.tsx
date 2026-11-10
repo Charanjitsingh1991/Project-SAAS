@@ -1,10 +1,16 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { AuthForm } from "@/components/auth-form";
 import { AuthShell } from "@/components/auth-shell";
 
 export const metadata: Metadata = { title: "Log in" };
 
-export default function LoginPage() {
+async function LoginForm({ searchParams }: { searchParams: PageProps<"/login">["searchParams"] }) {
+  const next = (await searchParams).next;
+  return <AuthForm mode="login" next={typeof next === "string" ? next : undefined} />;
+}
+
+export default function LoginPage(props: PageProps<"/login">) {
   return (
     <AuthShell
       title={
@@ -14,7 +20,9 @@ export default function LoginPage() {
       }
       subtitle="Log in to your saas.tech workspace."
     >
-      <AuthForm mode="login" />
+      <Suspense fallback={<AuthForm mode="login" />}>
+        <LoginForm searchParams={props.searchParams} />
+      </Suspense>
     </AuthShell>
   );
 }
