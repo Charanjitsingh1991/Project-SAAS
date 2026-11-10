@@ -16,13 +16,13 @@ export const metadata: Metadata = { title: "Analytics" };
 const RANGES = { month: "This month", quarter: "Last 3 months", fy: "This fiscal year" } as const;
 type Range = keyof typeof RANGES;
 
-function rangeDates(range: Range, today: string): [string, string] {
+function rangeDates(range: Range, today: string, fyStartMonth: number): [string, string] {
   if (range === "month") return [`${today.slice(0, 7)}-01`, today];
   if (range === "quarter") {
     const d = new Date(`${today}T00:00:00Z`);
     return [new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 2, 1)).toISOString().slice(0, 10), today];
   }
-  return [fiscalYear(today)[0], today];
+  return [fiscalYear(today, fyStartMonth)[0], today];
 }
 
 function monthsBack(n: number, today: string) {
@@ -72,7 +72,7 @@ export default async function AnalyticsPage(props: PageProps<"/app/analytics">) 
   const sp = await props.searchParams;
   const range: Range = sp.range === "quarter" || sp.range === "fy" ? sp.range : "month";
   const today = todayYmd();
-  const [from, to] = rangeDates(range, today);
+  const [from, to] = rangeDates(range, today, ws.org.fiscalYearStart);
   const orgId = ws.org.id;
   const cur = ws.org.currency;
   const fmt = (n: number) => formatMoneyCompact(n, cur);

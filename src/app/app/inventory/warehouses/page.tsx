@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { eq } from "drizzle-orm";
 import { ActionButton, ActionForm, Input, SubmitButton } from "@/components/app/forms";
 import { Badge, Card, EmptyState, PageHeader } from "@/components/app/ui";
@@ -6,7 +7,7 @@ import { db, schema } from "@/db";
 import { formatMoney } from "@/lib/format";
 import { fmtQty } from "@/lib/inventory";
 import { getWarehouses } from "@/lib/inventory-data";
-import { requireWorkspace } from "@/lib/tenancy";
+import { planOf, requireWorkspace } from "@/lib/tenancy";
 import { createWarehouse, deleteWarehouse, setDefaultWarehouse, updateWarehouse } from "../actions";
 import { ErrorBanner } from "../_components/parts";
 import { INVENTORY_TABS } from "../tabs";
@@ -35,10 +36,22 @@ export default async function WarehousesPage({ searchParams }: { searchParams: P
     if (l.qty !== 0) s.skus++;
     stats.set(l.warehouseId, s);
   }
+  const plan = planOf(ws);
+  const max = plan.maxWarehouses;
+  const atLimit = max !== null && warehouses.length >= max;
 
   return (
     <>
-      <PageHeader title="Inventory" description="Locations that hold stock. Exactly one is the default for receipts and new POs." tabs={INVENTORY_TABS("warehouses")} />
+      <PageHeader
+        title="Inventory"
+        description="Locations that hold stock. Exactly one is the default for receipts and new POs."
+        tabs={INVENTORY_TABS("warehouses")}
+        actions={
+          <span className={`rounded-full border border-ink/10 px-3 py-1 text-sm ${atLimit ? "bg-butter" : "bg-card"}`}>
+            {warehouses.length} of {max === null ? "unlimited" : max} warehouse{max === 1 ? "" : "s"} used · {plan.name}
+          </span>
+        }
+      />
       <ErrorBanner message={error} />
 
       {warehouses.length === 0 ? (
@@ -97,6 +110,17 @@ export default async function WarehousesPage({ searchParams }: { searchParams: P
         </div>
       )}
 
+      {atLimit ? (
+        <Card title="New warehouse" className="mt-6">
+          <p className="text-sm text-ink-soft">
+            Your {plan.name} plan includes {max} warehouse{max === 1 ? "" : "s"}, and you&apos;re using all of them.{" "}
+            <Link href="/app/billing" className="font-medium text-ink underline">
+              Upgrade your plan
+            </Link>{" "}
+            to add more locations.
+          </p>
+        </Card>
+      ) : (
       <Card title="New warehouse" className="mt-6">
         <ActionForm action={createWarehouse} className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-3">
@@ -110,6 +134,7 @@ export default async function WarehousesPage({ searchParams }: { searchParams: P
           <SubmitButton>Add warehouse</SubmitButton>
         </ActionForm>
       </Card>
+      )}
     </>
   );
 }

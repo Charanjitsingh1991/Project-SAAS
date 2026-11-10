@@ -6,6 +6,7 @@ import { db, schema } from "@/db";
 import { ctxOf, logActivity } from "@/lib/activity";
 import { isValidYmd, isWeekend } from "@/lib/hrm";
 import { holidaySet, upsertAttendance } from "@/lib/hrm-data";
+import { weekendOf } from "@/lib/countries";
 import { requireWorkspace } from "@/lib/tenancy";
 
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -46,7 +47,7 @@ export async function markAllPresent(fd: FormData) {
   const ws = await requireWorkspace({ module: "hrm" });
   const orgId = ws.org.id;
   const date = String(fd.get("date") ?? "");
-  if (!isValidYmd(date) || isWeekend(date) || (await holidaySet(orgId, date, date)).has(date)) return;
+  if (!isValidYmd(date) || isWeekend(date, weekendOf(ws.org)) || (await holidaySet(orgId, date, date)).has(date)) return;
 
   const [emps, marked] = await Promise.all([
     db

@@ -4,7 +4,7 @@ import { Card, EmptyState, PageHeader, Stat, StatusBadge, Table, Td, Th } from "
 import { dashboard } from "@/lib/finance";
 import { AGING_BUCKETS, AGING_LABEL, invoiceDisplayStatus, type AgingBucket } from "@/lib/finance-utils";
 import { daysBetween, formatDate, formatMoney, formatMoneyCompact, todayYmd } from "@/lib/format";
-import { requireWorkspace } from "@/lib/tenancy";
+import { packFor, requireWorkspace } from "@/lib/tenancy";
 import { FINANCE_TABS } from "./tabs";
 
 export const metadata: Metadata = { title: "Finance" };
@@ -21,7 +21,7 @@ export default async function FinancePage() {
   const ws = await requireWorkspace({ module: "finance" });
   const cur = ws.org.currency;
   const today = todayYmd();
-  const d = await dashboard(ws.org.id, today);
+  const d = await dashboard(ws.org.id, today, ws.org.fiscalYearStart);
   const { ar } = d;
 
   return (
@@ -42,7 +42,7 @@ export default async function FinancePage() {
         <Stat label="Overdue" value={formatMoneyCompact(ar.overdueAmount, cur)} hint={`${ar.overdueCount} invoice${ar.overdueCount === 1 ? "" : "s"} past due`} tone={ar.overdueCount ? "rose" : "mint"} />
         <Stat label="Collected this month" value={formatMoneyCompact(d.collectedThisMonth, cur)} tone="mint" />
         <Stat label={`Net profit · FY ${d.fiscal[0].slice(0, 4)}–${d.fiscal[1].slice(2, 4)}`} value={formatMoneyCompact(d.netProfit, cur)} hint="Income − expenses from the ledger" tone="lilac" />
-        <Stat label="GST payable (net)" value={formatMoneyCompact(d.gstNet, cur)} hint={d.gstNet < 0 ? "Input credit exceeds output" : "Output − input credit"} tone="butter" />
+        <Stat label={`${packFor(ws).tax.name} payable (net)`} value={formatMoneyCompact(d.gstNet, cur)} hint={d.gstNet < 0 ? "Input credit exceeds output" : "Output − input credit"} tone="butter" />
         <Stat label="Cash balance" value={formatMoneyCompact(d.cash, cur)} hint="Bank & cash account" tone="lime" />
       </div>
 

@@ -5,9 +5,10 @@ import { Card, PageHeader } from "@/components/app/ui";
 import { db, schema } from "@/db";
 import { fromMinor } from "@/lib/format";
 import { getProductsWithStock, getVendors, getWarehouses } from "@/lib/inventory-data";
-import { requireWorkspace } from "@/lib/tenancy";
+import { packFor, requireWorkspace } from "@/lib/tenancy";
 import { updatePurchaseOrder } from "../../../actions";
 import { PoForm } from "../../../_components/po-form";
+import { inventoryTax } from "../../../_components/tax";
 import { INVENTORY_TABS } from "../../../tabs";
 
 export const metadata: Metadata = { title: "Edit purchase order" };
@@ -49,6 +50,7 @@ export default async function EditPurchaseOrderPage({ params }: { params: Promis
             lines: lines.map((l) => ({ productId: l.productId, quantity: l.quantity, unitCost: fromMinor(l.unitCost), taxRate: l.taxRate })),
           }}
           submitLabel="Save changes"
+          tax={inventoryTax(packFor(ws))}
         />
       </Card>
     </>

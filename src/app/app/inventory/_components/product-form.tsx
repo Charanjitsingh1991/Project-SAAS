@@ -1,8 +1,8 @@
 import { ActionForm, Input, Select, SubmitButton } from "@/components/app/forms";
-import { GST_RATES } from "@/lib/accounting";
 import { UNITS } from "@/db/schema";
 import { fromMinor } from "@/lib/format";
 import { createProduct, updateProduct } from "../actions";
+import type { InventoryTax } from "./tax";
 
 type Option = { id: number; name: string };
 export type ProductFormValues = {
@@ -29,14 +29,16 @@ export function ProductForm({
   warehouses,
   product,
   costLocked,
+  tax,
 }: {
   vendors: Option[];
   warehouses?: Option[];
   product?: ProductFormValues;
   costLocked?: boolean;
+  tax: InventoryTax;
 }) {
   const editing = !!product;
-  const rates = [...new Set<number>([...GST_RATES, product?.taxRate ?? 18])].sort((a, b) => a - b);
+  const rates = [...new Set<number>([...tax.rates, product?.taxRate ?? tax.defaultRate])].sort((a, b) => a - b);
   return (
     <ActionForm action={editing ? updateProduct : createProduct} resetOnSuccess={!editing} className="space-y-4">
       {editing && <input type="hidden" name="id" value={product.id} />}
@@ -60,7 +62,7 @@ export function ProductForm({
           placeholder="0.00"
         />
         <Input label="Selling price" name="sellingPrice" inputMode="decimal" defaultValue={product ? fromMinor(product.sellingPrice) : ""} placeholder="0.00" />
-        <Select label="GST %" name="taxRate" options={rates.map((r) => ({ value: r, label: `${r}%` }))} defaultValue={product?.taxRate ?? 18} />
+        <Select label={`${tax.name} %`} name="taxRate" options={rates.map((r) => ({ value: r, label: `${r}%` }))} defaultValue={product?.taxRate ?? tax.defaultRate} />
         <Input label="Reorder level" name="reorderLevel" inputMode="decimal" defaultValue={product?.reorderLevel ?? 0} />
         <Input label="Reorder qty" name="reorderQty" inputMode="decimal" defaultValue={product?.reorderQty ?? 0} />
         <Select

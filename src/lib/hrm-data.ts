@@ -3,6 +3,7 @@ import { and, asc, eq, gte, inArray, lte, ne, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { logActivity, type Ctx } from "./activity";
 import { parseAutomations } from "./automations";
+import { weekendOf } from "./countries";
 import { addDaysYmd, formatDate } from "./format";
 import { ONBOARDING_TEMPLATE, OFFBOARDING_TEMPLATE, countLeaveDays, isValidYmd, leaveBalance, workingDates } from "./hrm";
 
@@ -12,6 +13,12 @@ export async function holidaySet(orgId: number, from: string, to: string) {
     .from(schema.holidays)
     .where(and(eq(schema.holidays.orgId, orgId), eq(schema.holidays.optional, false), gte(schema.holidays.date, from), lte(schema.holidays.date, to)));
   return new Set(rows.map((r) => r.date));
+}
+
+/** Workspace weekend days (country default or owner override). */
+export async function orgWeekend(orgId: number) {
+  const [o] = await db.select({ weekendDays: schema.organizations.weekendDays, country: schema.organizations.country }).from(schema.organizations).where(eq(schema.organizations.id, orgId)).limit(1);
+  return weekendOf(o ?? {});
 }
 
 /** Balances per active leave type for a calendar year (approved days used, pending shown separately). */
@@ -76,7 +83,7 @@ export async function submitLeave(ctx: Ctx, input: LeaveInput): Promise<LeaveRes
   if (!type || !type.active) return fail("leaveTypeId", "Pick an active leave type.");
 
   const holidays = await holidaySet(orgId, startDate, endDate);
-  const days = countLeaveDays(startDate, endDate, halfDay, holidays);
+  const days = countLeaveDays(startDate, endDate, halfDay, holidays, await orgWeekend(orgId));
   if (days <= 0) return fail("startDate", "No working days in this range (weekends and holidays are skipped).");
 
   const [clash] = await db
@@ -156,7 +163,7 @@ export async function decideLeave(
       .where(and(eq(schema.leaveRequests.id, req.id), eq(schema.leaveRequests.orgId, orgId)));
     if (parseAutomations(orgAutomations).leaveToAttendance) {
       const holidays = await holidaySet(orgId, req.startDate, req.endDate);
-      const dates = workingDates(req.startDate, req.endDate, holidays);
+      const dates = workingDates(req.startDate, req.endDate, holidays, await orgWeekend(orgId));
       for (const date of dates) {
         const values = {
           orgId,

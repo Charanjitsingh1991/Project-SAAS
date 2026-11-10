@@ -8,7 +8,7 @@ import { db, schema } from "@/db";
 import { formatDate, formatMoney } from "@/lib/format";
 import { fmtQty } from "@/lib/inventory";
 import { amountInWords } from "@/lib/money";
-import { requireWorkspace } from "@/lib/tenancy";
+import { packFor, requireWorkspace } from "@/lib/tenancy";
 import { cancelPo, deletePo, markPoOrdered, receivePo } from "../../actions";
 import { PrintButton } from "../../_components/print-button";
 import { ErrorBanner } from "../../_components/parts";
@@ -23,6 +23,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
   const sp = await searchParams;
   const orgId = ws.org.id;
   const cur = ws.org.currency;
+  const pack = packFor(ws);
 
   const [row] = await db
     .select({ po: schema.purchaseOrders, vendor: schema.vendors, warehouse: schema.warehouses })
@@ -126,13 +127,21 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
           <div>
             <p className="font-mono text-[11px] tracking-widest text-ink-mute uppercase">Buyer</p>
             <p className="font-medium">{ws.org.name}</p>
-            {ws.org.gstin && <p className="font-mono text-xs">GSTIN {ws.org.gstin}</p>}
+            {ws.org.gstin && (
+              <p className="font-mono text-xs">
+                {pack.tax.idLabel} {ws.org.gstin}
+              </p>
+            )}
             {ws.org.address && <p className="whitespace-pre-line text-sm text-ink-soft">{ws.org.address}</p>}
           </div>
           <div>
             <p className="font-mono text-[11px] tracking-widest text-ink-mute uppercase">Vendor</p>
             <p className="font-medium">{vendor.name}</p>
-            {vendor.gstin && <p className="font-mono text-xs">GSTIN {vendor.gstin}</p>}
+            {vendor.gstin && (
+              <p className="font-mono text-xs">
+                {pack.tax.idLabel} {vendor.gstin}
+              </p>
+            )}
             {vendor.address && <p className="whitespace-pre-line text-sm text-ink-soft">{vendor.address}</p>}
             {[vendor.email, vendor.phone].filter(Boolean).length > 0 && <p className="text-sm text-ink-soft">{[vendor.email, vendor.phone].filter(Boolean).join(" · ")}</p>}
           </div>
@@ -146,7 +155,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
                 <th className="py-2 pr-3 font-normal">Item</th>
                 <th className="py-2 pr-3 text-right font-normal">Qty</th>
                 <th className="py-2 pr-3 text-right font-normal">Unit cost</th>
-                <th className="py-2 pr-3 text-right font-normal">GST</th>
+                <th className="py-2 pr-3 text-right font-normal">{pack.tax.name}</th>
                 <th className="py-2 text-right font-normal">Amount</th>
               </tr>
             </thead>
@@ -182,7 +191,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
               <dd className="tabular-nums">{formatMoney(po.subtotal, cur)}</dd>
             </div>
             <div className="flex justify-between gap-6">
-              <dt className="text-ink-soft">GST</dt>
+              <dt className="text-ink-soft">{pack.tax.name}</dt>
               <dd className="tabular-nums">{formatMoney(po.taxTotal, cur)}</dd>
             </div>
             <div className="flex justify-between gap-6 border-t border-ink pt-1 text-base font-semibold">

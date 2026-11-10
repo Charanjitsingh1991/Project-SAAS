@@ -3,9 +3,9 @@ import { and, desc, eq } from "drizzle-orm";
 import { ActionForm, Input, Select, SubmitButton } from "@/components/app/forms";
 import { Badge, Card, EmptyState, PageHeader, Stat, StatusBadge, Table, Td, Th } from "@/components/app/ui";
 import { db, schema } from "@/db";
-import { EXPENSE_CATEGORIES, EXPENSE_CATEGORY_LABEL, GST_RATES } from "@/lib/accounting";
+import { EXPENSE_CATEGORIES, EXPENSE_CATEGORY_LABEL } from "@/lib/accounting";
 import { daysBetween, formatDate, formatMoney, formatMoneyCompact, todayYmd } from "@/lib/format";
-import { requireWorkspace } from "@/lib/tenancy";
+import { packFor, requireWorkspace } from "@/lib/tenancy";
 import { cn } from "@/lib/utils";
 import { createExpenseAction, deleteExpenseAction, payBillAction } from "../actions";
 import { ConfirmAction } from "../_components/confirm-action";
@@ -20,6 +20,7 @@ export default async function ExpensesPage({ searchParams }: PageProps<"/app/fin
   const ws = await requireWorkspace({ module: "finance" });
   const sp = await searchParams;
   const cur = ws.org.currency;
+  const tax = packFor(ws).tax;
   const today = todayYmd();
   const category = typeof sp.category === "string" ? sp.category : "";
   const status = sp.status === "paid" || sp.status === "unpaid" ? sp.status : "";
@@ -115,7 +116,7 @@ export default async function ExpensesPage({ searchParams }: PageProps<"/app/fin
                     <Th>Category</Th>
                     <Th>Source</Th>
                     <Th className="text-right">Amount</Th>
-                    <Th className="text-right">GST</Th>
+                    <Th className="text-right">{tax.name}</Th>
                     <Th className="text-right">Total</Th>
                     <Th>Status</Th>
                     <Th />
@@ -186,10 +187,10 @@ export default async function ExpensesPage({ searchParams }: PageProps<"/app/fin
             <Select label="Vendor" name="vendorId" placeholder="— None —" options={vendors.map((v) => ({ value: v.id, label: v.name }))} />
             <Input label="Description" name="description" placeholder="e.g. Office rent — November" required />
             <Select label="Category" name="category" options={EXPENSE_CATEGORIES.map((c) => ({ value: c.value, label: c.label }))} defaultValue="other_expense" />
-            <Input label="Amount (excl. GST)" name="amount" inputMode="decimal" placeholder="0.00" required />
+            <Input label={`Amount (excl. ${tax.name})`} name="amount" inputMode="decimal" placeholder="0.00" required />
             <div className="grid grid-cols-2 gap-3">
-              <Select label="GST rate (helper)" name="gstRate" placeholder="None" options={GST_RATES.filter((r) => r > 0).map((r) => ({ value: r, label: `${r}%` }))} />
-              <Input label="or GST amount" name="gstAmount" inputMode="decimal" placeholder="auto" />
+              <Select label={`${tax.name} rate (helper)`} name="gstRate" placeholder="None" options={[...new Set(tax.rates.filter((r) => r.kind === "standard" && r.rate > 0).map((r) => r.rate))].map((r) => ({ value: r, label: `${r}%` }))} />
+              <Input label={`or ${tax.name} amount`} name="gstAmount" inputMode="decimal" placeholder="auto" />
             </div>
             <Select label="Status" name="status" options={["paid", "unpaid"]} defaultValue="paid" />
             <div className="grid grid-cols-2 gap-3">

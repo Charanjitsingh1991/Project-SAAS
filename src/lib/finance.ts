@@ -178,10 +178,20 @@ export async function receivables(orgId: number, today: string) {
     .from(schema.invoices)
     .where(and(eq(schema.invoices.orgId, orgId), inArray(schema.invoices.status, ["sent", "partial"])))
     .orderBy(asc(schema.invoices.dueDate));
+  const credited = new Map<number, number>();
+  if (rows.length) {
+    const cn = await db
+      .select({ invoiceId: schema.creditNotes.invoiceId, total: sql<number>`coalesce(sum(${schema.creditNotes.total}), 0)` })
+      .from(schema.creditNotes)
+      .where(and(eq(schema.creditNotes.orgId, orgId), inArray(schema.creditNotes.invoiceId, rows.map((r) => r.id))))
+      .groupBy(schema.creditNotes.invoiceId);
+    for (const c of cn) if (c.invoiceId != null) credited.set(c.invoiceId, Number(c.total));
+  }
   const invoices: AgingInvoice[] = rows
     .map((i) => {
       const daysOverdue = daysBetween(i.dueDate, today);
-      return { id: i.id, number: i.number, customerName: i.customerName, dueDate: i.dueDate, balance: i.total - i.amountPaid, daysOverdue, bucket: agingBucket(daysOverdue) };
+      const balance = i.total - i.amountPaid - (credited.get(i.id) ?? 0);
+      return { id: i.id, number: i.number, customerName: i.customerName, dueDate: i.dueDate, balance, daysOverdue, bucket: agingBucket(daysOverdue) };
     })
     .filter((i) => i.balance > 0);
   const empty = () => Object.fromEntries(AGING_BUCKETS.map((b) => [b, 0])) as Record<AgingBucket, number>;
@@ -278,8 +288,8 @@ export async function cashMovement(orgId: number, from: string, to: string) {
 
 /* ───────────── Dashboard ───────────── */
 
-export async function dashboard(orgId: number, today: string) {
-  const [fyStart, fyEnd] = fiscalYear(today);
+export async function dashboard(orgId: number, today: string, fyStartMonth = 4) {
+  const [fyStart, fyEnd] = fiscalYear(today, fyStartMonth);
   const monthStart = `${today.slice(0, 7)}-01`;
   const [ar, fyBalances, allBalances, [collected], recent, bills] = await Promise.all([
     receivables(orgId, today),

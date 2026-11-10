@@ -5,10 +5,11 @@ import { refresh } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { db, schema } from "@/db";
-import { EXPENSE_CATEGORIES, GST_RATES, INDIAN_STATES } from "@/lib/accounting";
+import { EXPENSE_CATEGORIES } from "@/lib/accounting";
 import { ctxOf, logActivity } from "@/lib/activity";
 import type { FormState } from "@/lib/definitions";
-import { YMD } from "@/lib/finance-utils";
+import { taxOption, type CountryPack } from "@/lib/countries";
+import { YMD, normalizeTaxId } from "@/lib/finance-utils";
 import { formObject } from "@/lib/format";
 import { postJournal } from "@/lib/ledger";
 import { taxOf, toMinor } from "@/lib/money";
@@ -24,12 +25,13 @@ import {
   voidInvoice,
   type InvoiceLineInput,
 } from "@/lib/posting";
-import { requireWorkspace } from "@/lib/tenancy";
+import { hasFeature, packFor, requireWorkspace } from "@/lib/tenancy";
 
 const FIX = "Please fix the highlighted fields.";
 const date = z.string().regex(YMD, "Pick a date.");
 const id = z.coerce.number().int().positive();
 const methods = schema.PAYMENT_METHODS;
+const RECURRING_FREQUENCIES = ["monthly", "quarterly", "yearly"] as const;
 
 /* ───────────── Invoices ───────────── */
 
@@ -38,31 +40,66 @@ const LineSchema = z.object({
   description: z.string().trim().min(1, "Every line needs a description."),
   quantity: z.number().gt(0, "Quantity must be more than 0."),
   unitPrice: z.number().min(0, "Price can't be negative."),
-  taxRate: z.number().refine((r) => (GST_RATES as readonly number[]).includes(r), "Choose a valid GST rate."),
+  taxRate: z.number().min(0),
+  taxCode: z.string().max(20).nullable().optional(),
 });
 
-const InvoiceSchema = z
-  .object({
-    id: id.optional(),
-    companyId: id.optional(),
-    customerName: z.string().trim().min(2, "Enter a customer name.").max(120),
-    customerEmail: z.email("Invalid email.").optional(),
-    billingAddress: z.string().max(500).optional(),
-    customerGstin: z.string().trim().toUpperCase().max(20).optional(),
-    placeOfSupply: z.enum(INDIAN_STATES, "Choose the place of supply.").optional(),
-    issueDate: date,
-    dueDate: date,
-    notes: z.string().max(1000).optional(),
-    lines: z.string().min(2, "Add at least one line."),
-  })
-  .refine((v) => v.dueDate >= v.issueDate, { path: ["dueDate"], message: "Due date must be on or after the issue date." });
+/** Header schema for the workspace's country: tax ID pattern and place-of-supply regions come from the pack. */
+function invoiceSchema(pack: CountryPack) {
+  const idRe = new RegExp(pack.tax.idPattern);
+  return z
+    .object({
+      id: id.optional(),
+      companyId: id.optional(),
+      customerName: z.string().trim().min(2, "Enter a customer name.").max(120),
+      customerEmail: z.email("Invalid email.").optional(),
+      billingAddress: z.string().max(500).optional(),
+      customerGstin: z
+        .string()
+        .transform(normalizeTaxId)
+        .refine((s) => !s || idRe.test(s), `Enter a valid ${pack.tax.idLabel} (e.g. ${pack.tax.idExample}).`)
+        .optional(),
+      placeOfSupply: z
+        .string()
+        .refine((s) => pack.regions.includes(s), `Choose the place of supply (${pack.regionLabel.toLowerCase()}).`)
+        .optional(),
+      issueDate: date,
+      dueDate: date,
+      notes: z.string().max(1000).optional(),
+      lines: z.string().min(2, "Add at least one line."),
+      recurringFrequency: z.enum(RECURRING_FREQUENCIES).optional(),
+      recurringNextDate: date.optional(),
+      recurringEndDate: date.optional(),
+      recurringAutoSend: z.string().optional(),
+    })
+    .refine((v) => v.dueDate >= v.issueDate, { path: ["dueDate"], message: "Due date must be on or after the issue date." })
+    .refine((v) => !v.recurringFrequency || !!v.recurringNextDate, { path: ["recurringNextDate"], message: "Pick the next invoice date." })
+    .refine((v) => !v.recurringEndDate || !v.recurringNextDate || v.recurringEndDate >= v.recurringNextDate, {
+      path: ["recurringEndDate"],
+      message: "End date must be after the next invoice date.",
+    });
+}
+
+/** Validate a line's tax against the pack: a known code (preferred) or, for older clients, a known rate. */
+function resolveLineTax(pack: CountryPack, l: { taxRate: number; taxCode?: string | null }) {
+  if (l.taxCode) {
+    const opt = pack.tax.rates.find((r) => r.code === l.taxCode);
+    if (!opt) return null;
+    return { taxCode: opt.code, taxRate: opt.kind === "standard" ? opt.rate : 0 };
+  }
+  if (!pack.tax.rates.some((r) => r.rate === l.taxRate)) return null;
+  const opt = taxOption(pack, null, l.taxRate);
+  return { taxCode: opt.code, taxRate: opt.kind === "standard" ? opt.rate : 0 };
+}
 
 export async function saveInvoice(_: FormState, fd: FormData): Promise<FormState> {
   const ws = await requireWorkspace({ module: "finance" });
   const ctx = ctxOf(ws);
-  const parsed = InvoiceSchema.safeParse(formObject(fd));
+  const pack = packFor(ws);
+  const parsed = invoiceSchema(pack).safeParse(formObject(fd));
   if (!parsed.success) return { errors: z.flattenError(parsed.error).fieldErrors, message: FIX };
   const v = parsed.data;
+  if (v.recurringFrequency && !hasFeature(ws, "recurringInvoices")) return { message: "Recurring invoices are part of the Growth plan." };
 
   let rawLines: unknown;
   try {
@@ -89,19 +126,18 @@ export async function saveInvoice(_: FormState, fd: FormData): Promise<FormState
     if (!c) return { errors: { companyId: ["Customer not found."] }, message: FIX };
   }
 
-  const lines: InvoiceLineInput[] = linesParsed.data.map((l) => ({
-    productId: l.productId ?? null,
-    description: l.description,
-    quantity: l.quantity,
-    unitPrice: toMinor(l.unitPrice),
-    taxRate: l.taxRate,
-  }));
+  const lines: InvoiceLineInput[] = [];
+  for (const l of linesParsed.data) {
+    const tax = resolveLineTax(pack, l);
+    if (!tax) return { errors: { lines: [`Choose a valid ${pack.tax.name} rate.`] }, message: `Choose a valid ${pack.tax.name} rate.` };
+    lines.push({ productId: l.productId ?? null, description: l.description, quantity: l.quantity, unitPrice: toMinor(l.unitPrice), ...tax });
+  }
   const header = {
     companyId: v.companyId ?? null,
     customerName: v.customerName,
     customerEmail: v.customerEmail ?? null,
     billingAddress: v.billingAddress ?? null,
-    customerGstin: v.customerGstin ?? null,
+    customerGstin: v.customerGstin || null,
     placeOfSupply: v.placeOfSupply ?? null,
     issueDate: v.issueDate,
     dueDate: v.dueDate,
@@ -121,6 +157,17 @@ export async function saveInvoice(_: FormState, fd: FormData): Promise<FormState
     const created = await createDraftInvoice(ctx, header, lines);
     await logActivity(ctx, { module: "finance", entityType: "invoice", entityId: created.id, action: "created", summary: `Created draft invoice ${created.number} for ${v.customerName}` });
     invoiceId = created.id;
+    if (v.recurringFrequency && v.recurringNextDate) {
+      await db.insert(schema.recurringInvoices).values({
+        orgId: ws.org.id,
+        templateInvoiceId: invoiceId,
+        frequency: v.recurringFrequency,
+        nextDate: v.recurringNextDate,
+        endDate: v.recurringEndDate ?? null,
+        autoSend: v.recurringAutoSend === "on",
+      });
+      await logActivity(ctx, { module: "finance", entityType: "invoice", entityId: invoiceId, action: "recurring", summary: `Set ${created.number} to repeat ${v.recurringFrequency}` });
+    }
   }
   redirect(`/app/finance/invoices/${invoiceId}`);
 }
@@ -155,6 +202,12 @@ export async function deleteDraftInvoice(_: FormState, fd: FormData): Promise<Fo
   const [inv] = await db.select().from(schema.invoices).where(and(eq(schema.invoices.id, p.data.invoiceId), eq(schema.invoices.orgId, ws.org.id))).limit(1);
   if (!inv) return { message: "Invoice not found." };
   if (inv.status !== "draft") return { message: "Only draft invoices can be deleted. Void it instead." };
+  const [schedule] = await db
+    .select({ id: schema.recurringInvoices.id })
+    .from(schema.recurringInvoices)
+    .where(and(eq(schema.recurringInvoices.orgId, ws.org.id), eq(schema.recurringInvoices.templateInvoiceId, inv.id)))
+    .limit(1);
+  if (schedule) return { message: "This draft is the template of a recurring schedule. Delete the schedule first." };
   await db.update(schema.deals).set({ invoiceId: null }).where(and(eq(schema.deals.orgId, ws.org.id), eq(schema.deals.invoiceId, inv.id)));
   await db.update(schema.timeEntries).set({ invoiceId: null }).where(and(eq(schema.timeEntries.orgId, ws.org.id), eq(schema.timeEntries.invoiceId, inv.id)));
   await db.delete(schema.invoices).where(eq(schema.invoices.id, inv.id));
@@ -191,6 +244,9 @@ export async function deletePaymentAction(_: FormState, fd: FormData): Promise<F
   const ws = await requireWorkspace({ module: "finance" });
   const p = z.object({ paymentId: id }).safeParse(formObject(fd));
   if (!p.success) return { message: "Invalid payment." };
+  const [pay] = await db.select({ amount: schema.payments.amount }).from(schema.payments).where(and(eq(schema.payments.id, p.data.paymentId), eq(schema.payments.orgId, ws.org.id))).limit(1);
+  // Refunds are negative payments whose journal isn't linked to the row, so deleting them would unbalance the books.
+  if (pay && pay.amount < 0) return { message: "Refunds can't be deleted. Post a correcting journal entry if it was recorded by mistake." };
   await deletePayment(ctxOf(ws), p.data.paymentId);
   refresh();
   return { ok: true, message: "Payment deleted." };
@@ -224,9 +280,9 @@ export async function createExpenseAction(_: FormState, fd: FormData): Promise<F
   let tax = 0;
   if (v.gstAmount) {
     tax = toMinor(v.gstAmount);
-    if (!Number.isFinite(tax) || tax < 0) return { errors: { gstAmount: ["Invalid GST amount."] }, message: FIX };
+    if (!Number.isFinite(tax) || tax < 0) return { errors: { gstAmount: [`Invalid ${packFor(ws).tax.name} amount.`] }, message: FIX };
   } else if (v.gstRate) {
-    if (!(GST_RATES as readonly number[]).includes(v.gstRate)) return { errors: { gstRate: ["Invalid GST rate."] }, message: FIX };
+    if (!packFor(ws).tax.rates.some((r) => r.kind === "standard" && r.rate === v.gstRate)) return { errors: { gstRate: [`Invalid ${packFor(ws).tax.name} rate.`] }, message: FIX };
     tax = taxOf(amount, v.gstRate);
   }
   if (v.vendorId) {

@@ -1,25 +1,30 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Card, EmptyState, PageHeader, Stat, Table, Td, Th } from "@/components/app/ui";
-import { fiscalYear } from "@/lib/accounting";
+import { fiscalYearFor } from "@/lib/countries";
 import { balanceSheet, cashMovement, gstSummary, profitAndLoss, receivables, trialBalance, type PlRow } from "@/lib/finance";
 import { AGING_BUCKETS, AGING_LABEL, YMD } from "@/lib/finance-utils";
 import { formatDate, formatMoney, formatPeriod, todayYmd } from "@/lib/format";
-import { requireWorkspace } from "@/lib/tenancy";
+import { corporateTaxEstimate, taxReturn } from "@/lib/tax-return";
+import { packFor, requireWorkspace } from "@/lib/tenancy";
 import { cn } from "@/lib/utils";
 import { FINANCE_TABS } from "../tabs";
+import { loadTaxReturnInput } from "./tax-data";
+import { CorporateTaxCard, TaxReturnView } from "./tax-return-view";
 
 export const metadata: Metadata = { title: "Reports" };
 
-const REPORTS = [
-  { key: "pl", label: "Profit & loss" },
-  { key: "bs", label: "Balance sheet" },
-  { key: "tb", label: "Trial balance" },
-  { key: "aging", label: "Receivables aging" },
-  { key: "gst", label: "GST summary" },
-  { key: "cash", label: "Cash" },
-] as const;
-type ReportKey = (typeof REPORTS)[number]["key"];
+const REPORT_KEYS = ["pl", "bs", "tb", "aging", "tax", "gst", "cash"] as const;
+type ReportKey = (typeof REPORT_KEYS)[number];
+
+/** First and last day of the calendar month / quarter containing `ymd`, shifted back `back` periods. */
+function periodRange(ymd: string, months: 1 | 3, back = 0): [string, string] {
+  const [y, m] = ymd.split("-").map(Number);
+  const startMonth = Math.floor((m - 1) / months) * months - back * months;
+  const start = new Date(Date.UTC(y, startMonth, 1));
+  const end = new Date(Date.UTC(y, startMonth + months, 0));
+  return [start.toISOString().slice(0, 10), end.toISOString().slice(0, 10)];
+}
 
 const Check = ({ ok, children }: { ok: boolean; children: React.ReactNode }) => (
   <p className={cn("mt-4 inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-medium", ok ? "bg-mint/70" : "bg-signal/10 text-signal")}>
@@ -32,11 +37,23 @@ export default async function ReportsPage({ searchParams }: PageProps<"/app/fina
   const sp = await searchParams;
   const orgId = ws.org.id;
   const cur = ws.org.currency;
+  const pack = packFor(ws);
+  const REPORTS: { key: ReportKey; label: string }[] = [
+    { key: "pl", label: "Profit & loss" },
+    { key: "bs", label: "Balance sheet" },
+    { key: "tb", label: "Trial balance" },
+    { key: "aging", label: "Receivables aging" },
+    { key: "tax", label: pack.tax.returnName },
+    { key: "gst", label: `${pack.tax.name} by month` },
+    { key: "cash", label: "Cash" },
+  ];
   const today = todayYmd();
-  const [fyFrom, fyTo] = fiscalYear(today);
-  const r: ReportKey = REPORTS.some((x) => x.key === sp.r) ? (sp.r as ReportKey) : "pl";
-  let from = typeof sp.from === "string" && YMD.test(sp.from) ? sp.from : fyFrom;
-  let to = typeof sp.to === "string" && YMD.test(sp.to) ? sp.to : fyTo;
+  const [fyFrom, fyTo] = fiscalYearFor(today, ws.org.fiscalYearStart);
+  const r: ReportKey = (REPORT_KEYS as readonly string[]).includes(String(sp.r)) ? (sp.r as ReportKey) : "pl";
+  // Returns default to last month; other reports to the fiscal year.
+  const [defFrom, defTo] = r === "tax" ? periodRange(today, 1, 1) : [fyFrom, fyTo];
+  let from = typeof sp.from === "string" && YMD.test(sp.from) ? sp.from : defFrom;
+  let to = typeof sp.to === "string" && YMD.test(sp.to) ? sp.to : defTo;
   if (to < from) [from, to] = [to, from];
   const money = (v: number) => formatMoney(v, cur);
   const range = `${formatDate(from)} – ${formatDate(to)}`;
@@ -270,6 +287,38 @@ export default async function ReportsPage({ searchParams }: PageProps<"/app/fina
           </Table>
         </Card>
       );
+  } else if (r === "tax") {
+    const { input, counts } = await loadTaxReturnInput(orgId, ws.org.state, from, to);
+    const ret = taxReturn(pack, input);
+    let ct: React.ReactNode = null;
+    if (pack.corporateTax) {
+      const fy = fiscalYearFor(to, ws.org.fiscalYearStart);
+      const p = await profitAndLoss(orgId, fy[0], fy[1]);
+      ct = <CorporateTaxCard est={corporateTaxEstimate(p.totals.net.total, pack.corporateTax)} fy={fy} note={pack.corporateTax.note} currency={cur} />;
+    }
+    const quick: [string, [string, string]][] = [
+      ["This month", periodRange(today, 1)],
+      ["Last month", periodRange(today, 1, 1)],
+      ["This quarter", periodRange(today, 3)],
+      ["Last quarter", periodRange(today, 3, 1)],
+    ];
+    body = (
+      <>
+        <div className="mb-4 flex flex-wrap gap-1.5 print:hidden">
+          {quick.map(([label, [f, t]]) => (
+            <Link
+              key={label}
+              href={`/app/finance/reports?${new URLSearchParams({ r: "tax", from: f, to: t })}`}
+              className={cn("rounded-full border px-3 py-1 text-xs transition", f === from && t === to ? "border-ink bg-ink/5 font-medium" : "border-line hover:border-ink")}
+            >
+              {label}
+            </Link>
+          ))}
+        </div>
+        <TaxReturnView ret={ret} pack={pack} currency={cur} counts={counts} />
+        {ct}
+      </>
+    );
   } else if (r === "gst") {
     const g = await gstSummary(orgId, from, to);
     body = (
@@ -278,8 +327,8 @@ export default async function ReportsPage({ searchParams }: PageProps<"/app/fina
           <thead>
             <tr>
               <Th>Month</Th>
-              <Th className="text-right">Output GST (collected)</Th>
-              <Th className="text-right">Input GST (credit)</Th>
+              <Th className="text-right">Output {pack.tax.name} (collected)</Th>
+              <Th className="text-right">Input {pack.tax.name} (credit)</Th>
               <Th className="text-right">Net payable</Th>
             </tr>
           </thead>

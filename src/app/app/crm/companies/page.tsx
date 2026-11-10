@@ -5,9 +5,9 @@ import { Download, Plus } from "lucide-react";
 import { Card, EmptyState, PageHeader, Table, Td, Th } from "@/components/app/ui";
 import { db, schema } from "@/db";
 import { formatMoney } from "@/lib/format";
-import { requireWorkspace } from "@/lib/tenancy";
+import { packFor, requireWorkspace } from "@/lib/tenancy";
 import { getMembers } from "../data";
-import { CompanyForm } from "../parts";
+import { CompanyForm, taxFields } from "../parts";
 import { CRM_TABS } from "../tabs";
 
 export const metadata: Metadata = { title: "Companies" };
@@ -16,6 +16,7 @@ export default async function CompaniesPage({ searchParams }: { searchParams: Pr
   const ws = await requireWorkspace({ module: "crm" });
   const q = ((await searchParams).q ?? "").trim();
   const orgId = ws.org.id;
+  const pack = packFor(ws);
 
   const conds = [eq(schema.companies.orgId, orgId)];
   if (q) conds.push(or(like(schema.companies.name, `%${q}%`), like(schema.companies.industry, `%${q}%`), like(schema.companies.city, `%${q}%`))!);
@@ -80,7 +81,11 @@ export default async function CompaniesPage({ searchParams }: { searchParams: Pr
                       <Link href={`/app/crm/companies/${c.id}`} className="font-medium hover:underline">
                         {c.name}
                       </Link>
-                      {c.gstin && <p className="font-mono text-xs text-ink-mute">{c.gstin}</p>}
+                      {c.gstin && (
+                        <p className="font-mono text-xs text-ink-mute">
+                          {pack.tax.idLabel} {c.gstin}
+                        </p>
+                      )}
                     </Td>
                     <Td className="text-ink-soft">{c.industry ?? "—"}</Td>
                     <Td className="text-ink-soft">{[c.city, c.state].filter(Boolean).join(", ") || "—"}</Td>
@@ -100,7 +105,7 @@ export default async function CompaniesPage({ searchParams }: { searchParams: Pr
           <Plus className="size-4" /> Add company
         </summary>
         <div className="border-t border-line p-5">
-          <CompanyForm members={members} />
+          <CompanyForm members={members} tax={taxFields(pack)} />
         </div>
       </details>
     </>
