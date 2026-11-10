@@ -6,7 +6,7 @@ import { db, schema } from "@/db";
 import { formatDate, todayYmd } from "@/lib/format";
 import { profitability, progressPct } from "@/lib/projects";
 import { canManage } from "@/lib/roles";
-import { requireWorkspace } from "@/lib/tenancy";
+import { planModules, requireWorkspace } from "@/lib/tenancy";
 import { costPerHourMap, linkedEmployee, loadEmployees, loadMembers } from "../data";
 import { BackLink } from "../parts";
 import { BoardView, ListView, MilestonesView, SettingsView, TimelineView, TimeView, type EntryRow } from "./views";
@@ -112,6 +112,7 @@ export default async function ProjectPage({ params, searchParams }: PageProps<"/
           employeeOpts={manage ? props.employees : undefined}
           manage={manage}
           myEmployeeId={me?.id ?? null}
+          canBill={planModules(ws).includes("finance")}
         />
       )}
       {view === "settings" && (

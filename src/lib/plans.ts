@@ -59,7 +59,7 @@ export const PLANS: Record<PlanKey, PlanDef> = {
     maxWarehouses: 1,
     maxWorkspacesPerOwner: 1,
     features: [],
-    highlights: ["Any 3 of HRM, CRM, Finance, Inventory, Projects, Helpdesk", "Up to 25 users", "Quotes, CSV import & exports", "India & UAE tax compliance"],
+    highlights: ["Any 3 of HRM, CRM, Finance, Inventory, Projects, Helpdesk", "Up to 25 users", "Quotes, stock counts & CSV exports", "India (GST) and UAE (VAT) tax setups"],
   },
   growth: {
     key: "growth",
