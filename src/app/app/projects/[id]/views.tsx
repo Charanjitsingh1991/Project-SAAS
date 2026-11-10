@@ -341,6 +341,7 @@ export function TimeView({
   employeeOpts,
   manage,
   myEmployeeId,
+  canBill,
   today,
 }: ViewProps & {
   profit: Profitability;
@@ -350,6 +351,7 @@ export function TimeView({
   employeeOpts?: { value: number; label: string }[];
   manage: boolean;
   myEmployeeId: number | null;
+  canBill: boolean;
 }) {
   const totalHours = entries.reduce((s, r) => s + r.e.hours, 0);
   const unbilledValue = Math.round(unbilledHours * project.hourlyRate);
@@ -365,10 +367,14 @@ export function TimeView({
         <Card
           title="Time entries"
           actions={
-            <ActionForm action={billTimeAction}>
-              <input type="hidden" name="projectId" value={project.id} />
-              <SubmitButton variant="signal">Bill unbilled hours</SubmitButton>
-            </ActionForm>
+            canBill ? (
+              <ActionForm action={billTimeAction}>
+                <input type="hidden" name="projectId" value={project.id} />
+                <SubmitButton variant="signal">Bill unbilled hours</SubmitButton>
+              </ActionForm>
+            ) : (
+              <span className="text-xs text-ink-mute">Turn on Finance to invoice time</span>
+            )
           }
         >
           {entries.length === 0 ? (

@@ -25,7 +25,7 @@ export default async function DepartmentsPage() {
 
   return (
     <>
-      <PageHeader title="Departments" description="Teams, their heads and current headcount." tabs={hrmTabs("departments")} />
+      <PageHeader title="Departments" description="Teams, their heads and current headcount." tabs={hrmTabs(ws, "departments")} />
       <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
         <div className="space-y-4">
           {depts.length === 0 && (

@@ -12,10 +12,13 @@ import { formObject, todayYmd, toMinor } from "@/lib/format";
 import { computePoTotals, isLowStock, suggestedQty } from "@/lib/inventory";
 import { getProductsWithStock } from "@/lib/inventory-data";
 import { taxOf } from "@/lib/money";
-import { receivePurchaseOrder } from "@/lib/posting";
+import { completeStockCount, receivePurchaseOrder } from "@/lib/posting";
 import { nextNumber } from "@/lib/sequence";
 import { defaultWarehouseId, moveStock } from "@/lib/stock";
-import { requireWorkspace } from "@/lib/tenancy";
+import { defaultTaxRate } from "@/lib/countries";
+import { packFor, planOf, requireWorkspace } from "@/lib/tenancy";
+import { normalizeTaxId, taxIdError } from "@/app/app/crm/_components/tax-id";
+import { parseCounted } from "./stock-counts/utils";
 
 type Ws = Awaited<ReturnType<typeof requireWorkspace>>;
 
@@ -59,7 +62,7 @@ const ProductSchema = z.object({
   unit: z.enum(UNITS),
   costPrice: z.string().optional(),
   sellingPrice: z.string().optional(),
-  taxRate: z.coerce.number().min(0).max(100).default(18),
+  taxRate: z.coerce.number().min(0).max(100).optional(),
   reorderLevel: z.coerce.number().min(0).default(0),
   reorderQty: z.coerce.number().min(0).default(0),
   preferredVendorId: optId,
@@ -263,9 +266,13 @@ export async function createWarehouse(_: FormState, formData: FormData): Promise
   if (!parsed.success) return fail(parsed.error);
   const d = parsed.data;
   const orgId = ws.org.id;
+  const [{ n }] = await db.select({ n: sql<number>`count(*)` }).from(schema.warehouses).where(eq(schema.warehouses.orgId, orgId));
+  const plan = planOf(ws);
+  if (plan.maxWarehouses !== null && Number(n) >= plan.maxWarehouses) {
+    return { message: `Your ${plan.name} plan includes ${plan.maxWarehouses} warehouse${plan.maxWarehouses === 1 ? "" : "s"}. Upgrade your plan to add more locations.` };
+  }
   if (await codeTaken(orgId, d.code)) return { errors: { code: ["This code is already used."] }, message: "Please fix the highlighted fields." };
 
-  const [{ n }] = await db.select({ n: sql<number>`count(*)` }).from(schema.warehouses).where(eq(schema.warehouses.orgId, orgId));
   const [w] = await db.insert(schema.warehouses).values({ orgId, name: d.name, code: d.code, address: d.address ?? null, isDefault: false }).returning({ id: schema.warehouses.id });
   if (bool(raw.isDefault) || Number(n) === 0) await makeDefault(orgId, w.id);
   await logActivity(ctxOf(ws), { module: "inventory", entityType: "warehouse", entityId: w.id, action: "created", summary: `Added warehouse ${d.name}` });

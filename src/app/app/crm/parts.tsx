@@ -6,6 +6,7 @@ import { scoreTone } from "@/lib/crm";
 import { addActivity, createCompany, createContact, createDeal, deleteActivity, toggleActivity, updateCompany, updateContact, updateDeal } from "./actions";
 import { Check, Circle, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import type { TaxFields } from "./_components/tax-id";
 
 type Opt = { value: number; label: string };
 type Member = { id: number; name: string };
@@ -51,8 +52,19 @@ export function DealForm({ deal, companies, contacts, members, ownerDefault }: {
   );
 }
 
-export function CompanyForm({ company, members }: { company?: { id: number; name: string; industry: string | null; website: string | null; phone: string | null; gstin: string | null; billingAddress: string | null; city: string | null; state: string | null; country: string | null; ownerId: number | null }; members: Member[] }) {
+export { taxFields } from "./_components/tax-id";
+
+export function CompanyForm({
+  company,
+  members,
+  tax,
+}: {
+  company?: { id: number; name: string; industry: string | null; website: string | null; phone: string | null; gstin: string | null; billingAddress: string | null; city: string | null; state: string | null; country: string | null; ownerId: number | null };
+  members: Member[];
+  tax: TaxFields;
+}) {
   const editing = !!company;
+  const listId = `regions-${company?.id ?? "new"}`;
   return (
     <ActionForm action={editing ? updateCompany : createCompany} resetOnSuccess={!editing} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
       {editing && <input type="hidden" name="id" value={company.id} />}
@@ -60,11 +72,16 @@ export function CompanyForm({ company, members }: { company?: { id: number; name
       <Input label="Industry" name="industry" defaultValue={company?.industry ?? undefined} />
       <Input label="Website" name="website" defaultValue={company?.website ?? undefined} />
       <Input label="Phone" name="phone" defaultValue={company?.phone ?? undefined} />
-      <Input label="GSTIN" name="gstin" defaultValue={company?.gstin ?? undefined} placeholder="27AABCU9603R1ZM" />
+      <Input label={tax.idLabel} name="gstin" defaultValue={company?.gstin ?? undefined} placeholder={tax.idExample} />
       <Select label="Owner" name="ownerId" options={memberOpts(members)} placeholder="— Unassigned —" defaultValue={company?.ownerId ?? ""} />
       <Input label="City" name="city" defaultValue={company?.city ?? undefined} />
-      <Input label="State" name="state" defaultValue={company?.state ?? undefined} />
-      <Input label="Country" name="country" defaultValue={company?.country ?? "India"} />
+      <Input label={tax.regionLabel} name="state" defaultValue={company?.state ?? undefined} list={listId} />
+      <datalist id={listId}>
+        {tax.regions.map((r) => (
+          <option key={r} value={r} />
+        ))}
+      </datalist>
+      <Input label="Country" name="country" defaultValue={company?.country ?? tax.countryName} />
       <Textarea label="Billing address" name="billingAddress" defaultValue={company?.billingAddress ?? undefined} className="sm:col-span-2 lg:col-span-2" />
       <div className="flex items-end">
         <SubmitButton>{editing ? "Save company" : "Add company"}</SubmitButton>
