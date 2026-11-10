@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 import { deleteDeal, setDealStage } from "../../actions";
 import { getCompanyOptions, getContactOptions, getMembers, wallClock } from "../../data";
 import { ActivityForm, ActivityTimeline, DealForm } from "../../parts";
+import { QuoteList } from "../../_components/quote-status";
 import { CRM_TABS } from "../../tabs";
 
 export const metadata: Metadata = { title: "Deal" };
@@ -28,7 +29,7 @@ export default async function DealPage({ params }: { params: Promise<{ id: strin
   const [deal] = await db.select().from(schema.deals).where(and(eq(schema.deals.id, id), eq(schema.deals.orgId, orgId))).limit(1);
   if (!deal) notFound();
 
-  const [members, companies, contacts, activities, history, invoice, project] = await Promise.all([
+  const [members, companies, contacts, activities, history, invoice, project, quotes] = await Promise.all([
     getMembers(orgId),
     getCompanyOptions(orgId),
     getContactOptions(orgId),
@@ -45,6 +46,7 @@ export default async function DealPage({ params }: { params: Promise<{ id: strin
     deal.projectId
       ? db.select({ id: schema.projects.id, code: schema.projects.code, name: schema.projects.name }).from(schema.projects).where(and(eq(schema.projects.id, deal.projectId), eq(schema.projects.orgId, orgId))).limit(1)
       : Promise.resolve([]),
+    db.select().from(schema.quotes).where(and(eq(schema.quotes.dealId, id), eq(schema.quotes.orgId, orgId))).orderBy(desc(schema.quotes.createdAt), desc(schema.quotes.id)),
   ]);
 
   const cur = ws.org.currency;
@@ -150,6 +152,16 @@ export default async function DealPage({ params }: { params: Promise<{ id: strin
                 )}
               </ul>
             )}
+          </Card>
+          <Card
+            title={`Quotes (${quotes.length})`}
+            actions={
+              <Link href={`/app/crm/quotes/new?dealId=${deal.id}`} className="text-sm font-medium underline-offset-2 hover:underline">
+                New quote
+              </Link>
+            }
+          >
+            <QuoteList quotes={quotes} currency={cur} today={today} />
           </Card>
           <Card title="Stage history">
             {history.length === 0 ? (
