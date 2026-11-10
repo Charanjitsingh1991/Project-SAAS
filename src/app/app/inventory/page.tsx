@@ -1,11 +1,15 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { desc, eq } from "drizzle-orm";
-import { ActionButton, ActionForm, Input, SubmitButton } from "@/components/app/forms";
 import { Card, EmptyState, PageHeader, Stat, Table, Td, Th } from "@/components/app/ui";
 import { db, schema } from "@/db";
-import { formatDateTime, formatMoney } from "@/lib/format";
+import { daysOfCover, fmtQty, isLowStock, isStockOutRisk } from "@/lib/inventory";
+import { getProductsWithStock } from "@/lib/inventory-data";
+import { formatMoney } from "@/lib/format";
 import { requireWorkspace } from "@/lib/tenancy";
-import { adjustStock, createProduct, deleteProduct } from "./actions";
+import { MovementTable } from "./_components/movement-table";
+import { PrimaryLink, Qty } from "./_components/parts";
+import { INVENTORY_TABS } from "./tabs";
 
 export const metadata: Metadata = { title: "Inventory" };
 
@@ -14,146 +18,94 @@ export default async function InventoryPage() {
   const orgId = ws.org.id;
   const cur = ws.org.currency;
 
-  const [products, movements] = await Promise.all([
-    db.select().from(schema.products).where(eq(schema.products.orgId, orgId)).orderBy(schema.products.name),
+  const [all, recent] = await Promise.all([
+    getProductsWithStock(orgId),
     db
-      .select({ m: schema.stockMovements, name: schema.products.name })
+      .select({
+        id: schema.stockMovements.id,
+        createdAt: schema.stockMovements.createdAt,
+        type: schema.stockMovements.type,
+        quantity: schema.stockMovements.quantity,
+        reference: schema.stockMovements.reference,
+        note: schema.stockMovements.note,
+        productId: schema.stockMovements.productId,
+        product: schema.products.name,
+        sku: schema.products.sku,
+        warehouse: schema.warehouses.name,
+      })
       .from(schema.stockMovements)
       .innerJoin(schema.products, eq(schema.stockMovements.productId, schema.products.id))
+      .innerJoin(schema.warehouses, eq(schema.stockMovements.warehouseId, schema.warehouses.id))
       .where(eq(schema.stockMovements.orgId, orgId))
-      .orderBy(desc(schema.stockMovements.createdAt), desc(schema.stockMovements.id))
+      .orderBy(desc(schema.stockMovements.id))
       .limit(10),
   ]);
 
-  const units = products.reduce((s, p) => s + p.quantity, 0);
-  const value = products.reduce((s, p) => s + p.quantity * p.unitCost, 0);
-  const low = products.filter((p) => p.quantity <= p.reorderLevel);
+  const active = all.filter((p) => p.active);
+  const tracked = active.filter((p) => p.trackStock);
+  const value = tracked.reduce((s, p) => s + Math.round(p.onHand * p.costPrice), 0);
+  const low = tracked.filter((p) => isLowStock(p.onHand, p.reorderLevel));
+  const negative = tracked.filter((p) => p.onHand < 0);
+  const risk = tracked.filter((p) => isStockOutRisk(p.onHand, p.outflow30));
+  const watch = [...new Map([...risk, ...low].map((p) => [p.id, p])).values()].sort((a, b) => (daysOfCover(a.onHand, a.outflow30) ?? 9999) - (daysOfCover(b.onHand, b.outflow30) ?? 9999));
 
   return (
     <>
-      <PageHeader title="Inventory" description="Track products, stock levels and movements." />
+      <PageHeader
+        title="Inventory"
+        description="Stock across every warehouse, what to reorder, and what's about to run out."
+        tabs={INVENTORY_TABS("overview")}
+        actions={<PrimaryLink href="/app/inventory/purchase-orders/new">New purchase order</PrimaryLink>}
+      />
 
-      <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Stat label="SKUs" value={products.length} tone="sky" />
-        <Stat label="Units in stock" value={units.toLocaleString("en-IN")} tone="mint" />
-        <Stat label="Stock value" value={formatMoney(value, cur)} tone="lilac" />
-        <Stat label="Low stock" value={low.length} tone={low.length ? "rose" : "butter"} />
+      <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        <Stat label="Active SKUs" value={active.length} tone="sky" />
+        <Stat label="Inventory value" value={formatMoney(value, cur)} hint="Qty × avg. cost" tone="mint" />
+        <Stat label="Low stock" value={low.length} hint="At / below reorder level" tone={low.length ? "butter" : "card"} />
+        <Stat label="Negative stock" value={negative.length} hint="Oversold or unreceived" tone={negative.length ? "rose" : "card"} />
+        <Stat label="Stock-out risk" value={risk.length} hint="< 14 days of cover" tone={risk.length ? "peach" : "card"} />
       </div>
 
-      {low.length > 0 && (
-        <Card title="Low stock" className="mb-6">
-          <ul className="divide-y divide-line/70 text-sm">
-            {low.map((p) => (
-              <li key={p.id} className="flex items-center justify-between py-2">
-                <span>
-                  <span className="font-medium">{p.name}</span> <span className="font-mono text-xs text-ink-mute">{p.sku}</span>
-                </span>
-                <span className="text-ink-soft">
-                  {p.quantity} left (reorder at {p.reorderLevel}) · <span className="font-medium text-signal">Reorder</span>
-                </span>
-              </li>
-            ))}
-          </ul>
-        </Card>
-      )}
-
-      <div className="grid gap-6 xl:grid-cols-[1fr_340px]">
-        <div className="space-y-6">
-          <Card title={`Products (${products.length})`}>
-            {products.length === 0 ? (
-              <EmptyState title="No products yet" />
-            ) : (
-              <Table>
-                <thead>
-                  <tr>
-                    <Th>Product</Th>
-                    <Th>Category</Th>
-                    <Th className="text-right">Qty</Th>
-                    <Th className="text-right">Reorder</Th>
-                    <Th className="text-right">Unit cost</Th>
-                    <Th className="text-right">Value</Th>
-                    <Th>Adjust stock</Th>
-                    <Th />
-                  </tr>
-                </thead>
-                <tbody>
-                  {products.map((p) => (
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Card title="Needs attention" actions={<Link href="/app/inventory/reorder" className="text-sm text-ink-soft hover:text-ink">Reorder planner →</Link>}>
+          {watch.length === 0 ? (
+            <EmptyState title="All stocked up">No low-stock or stock-out risks right now.</EmptyState>
+          ) : (
+            <Table>
+              <thead>
+                <tr>
+                  <Th>Product</Th>
+                  <Th className="text-right">On hand</Th>
+                  <Th className="text-right">Reorder at</Th>
+                  <Th className="text-right">Cover</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {watch.map((p) => {
+                  const cover = daysOfCover(p.onHand, p.outflow30);
+                  return (
                     <tr key={p.id}>
                       <Td>
-                        <p className="font-medium">{p.name}</p>
+                        <Link href={`/app/inventory/products/${p.id}`} className="font-medium hover:underline">
+                          {p.name}
+                        </Link>
                         <p className="font-mono text-xs text-ink-mute">{p.sku}</p>
                       </Td>
-                      <Td className="text-ink-soft">{p.category ?? "—"}</Td>
-                      <Td className={`text-right font-bold tabular-nums ${p.quantity <= p.reorderLevel ? "text-signal" : ""}`}>{p.quantity}</Td>
-                      <Td className="text-right tabular-nums text-ink-soft">{p.reorderLevel}</Td>
-                      <Td className="text-right tabular-nums">{formatMoney(p.unitCost, cur)}</Td>
-                      <Td className="text-right tabular-nums">{formatMoney(p.quantity * p.unitCost, cur)}</Td>
-                      <Td>
-                        <form action={adjustStock} className="flex items-center gap-2">
-                          <input type="hidden" name="productId" value={p.id} />
-                          <input
-                            name="change"
-                            type="number"
-                            step={1}
-                            required
-                            placeholder="±"
-                            aria-label={`Adjust ${p.name} stock`}
-                            className="h-8 w-20 rounded-lg border border-line bg-paper px-2 text-sm"
-                          />
-                          <SubmitButton variant="outline" className="h-8 px-3 text-xs">
-                            Apply
-                          </SubmitButton>
-                        </form>
-                      </Td>
                       <Td className="text-right">
-                        <ActionButton action={deleteProduct} fields={{ id: p.id }} confirm={`Delete ${p.name} and its history?`} className="text-xs text-signal hover:underline">
-                          Delete
-                        </ActionButton>
+                        <Qty value={p.onHand} low={isLowStock(p.onHand, p.reorderLevel)} />
                       </Td>
+                      <Td className="text-right tabular-nums text-ink-soft">{fmtQty(p.reorderLevel)}</Td>
+                      <Td className={`text-right tabular-nums ${cover !== null && cover < 14 ? "font-medium text-signal" : "text-ink-soft"}`}>{cover === null ? "—" : `${Math.floor(cover)}d`}</Td>
                     </tr>
-                  ))}
-                </tbody>
-              </Table>
-            )}
-          </Card>
+                  );
+                })}
+              </tbody>
+            </Table>
+          )}
+        </Card>
 
-          <Card title="Recent movements">
-            {movements.length === 0 ? (
-              <EmptyState title="No stock movements yet" />
-            ) : (
-              <ul className="divide-y divide-line/70 text-sm">
-                {movements.map(({ m, name }) => (
-                  <li key={m.id} className="flex items-center justify-between gap-3 py-2">
-                    <span>
-                      <span className="font-medium">{name}</span>
-                      <span className="ml-2 text-ink-soft">{m.note ?? "—"}</span>
-                    </span>
-                    <span className="flex items-center gap-4">
-                      <span className={`font-medium tabular-nums ${m.change > 0 ? "text-green-700" : "text-signal"}`}>
-                        {m.change > 0 ? "+" : "−"}
-                        {Math.abs(m.change)}
-                      </span>
-                      <span className="text-xs text-ink-mute">{formatDateTime(m.createdAt)}</span>
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
-        </div>
-
-        <Card title="Add product" className="h-fit">
-          <ActionForm action={createProduct} className="space-y-3">
-            <Input label="Name" name="name" />
-            <Input label="SKU" name="sku" />
-            <Input label="Category (optional)" name="category" />
-            <div className="grid grid-cols-2 gap-3">
-              <Input label="Opening qty" name="quantity" type="number" min={0} step={1} defaultValue={0} />
-              <Input label="Reorder level" name="reorderLevel" type="number" min={0} step={1} defaultValue={0} />
-            </div>
-            <Input label={`Unit cost (${cur})`} name="unitCost" type="number" min={0} step={1} defaultValue={0} />
-            <SubmitButton className="w-full">Add product</SubmitButton>
-          </ActionForm>
+        <Card title="Recent movements" actions={<Link href="/app/inventory/movements" className="text-sm text-ink-soft hover:text-ink">All movements →</Link>}>
+          {recent.length === 0 ? <EmptyState title="No movements yet">Receive a purchase order or add opening stock.</EmptyState> : <MovementTable rows={recent} />}
         </Card>
       </div>
     </>
