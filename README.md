@@ -1,6 +1,6 @@
-# saas.tech
+# saasmodels.tech
 
-Marketing site **and** multi-tenant SaaS app for saas.tech: HRM, CRM, Finance, Inventory, Payroll, Projects, Helpdesk and Analytics in one workspace, with company accounts, roles, a 14-day card-free trial and Stripe billing.
+Marketing site **and** multi-tenant SaaS app for saasmodels.tech: HRM, CRM, Finance, Inventory, Payroll, Projects, Helpdesk and Analytics in one workspace, with company accounts, roles, a 14-day card-free trial and Stripe billing.
 
 ## Stack
 
@@ -75,7 +75,7 @@ Only for emails listed in `ADMIN_EMAILS`:
 ## Connecting Stripe
 1. In the Stripe dashboard, create two products, **Starter** and **Growth**. Give each a **monthly** and a **yearly** recurring price, billed **per unit** (one unit = one seat).
 2. Set `STRIPE_SECRET_KEY` and the four `STRIPE_PRICE_*` IDs. The display prices are in `PLAN_PRICES` in `src/lib/stripe.ts`.
-3. Add a webhook endpoint `https://saas.tech/api/stripe/webhook` with these events:
+3. Add a webhook endpoint `https://saasmodels.tech/api/stripe/webhook` with these events:
    - `checkout.session.completed`
    - `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`
    - `invoice.paid`, `invoice.payment_failed`
@@ -93,6 +93,6 @@ Once connected:
 - A cancelled subscription deactivates the workspace after the period ends.
 
 ## Production
-- Set the variables from `.env.example` on your host (Vercel recommended), including `APP_URL=https://saas.tech`.
+- Set the variables from `.env.example` on your host (Vercel recommended), including `APP_URL=https://saasmodels.tech`.
 - Create a Turso database and set `DATABASE_URL` and `DATABASE_AUTH_TOKEN`, then run `npm run db:push` once against it.
 - `npm run db:studio` opens Drizzle Studio for browsing data.

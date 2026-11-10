@@ -12,7 +12,7 @@ export function AuthShell({ title, subtitle, children }: { title: React.ReactNod
           <p className="mt-3 mb-10 text-ink-soft">{subtitle}</p>
           {children}
         </div>
-        <p className="font-mono text-xs text-ink-mute">© saas.tech · Protected by encrypted sessions</p>
+        <p className="font-mono text-xs text-ink-mute">© saasmodels.tech · Protected by encrypted sessions</p>
       </div>
 
       <div className="relative m-3 hidden overflow-hidden rounded-[32px] bg-ink p-12 text-paper lg:flex lg:flex-col">

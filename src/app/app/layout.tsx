@@ -4,7 +4,7 @@ import { BillingBanner } from "@/components/app/billing-banner";
 import { CommandPalette } from "@/components/app/command-palette";
 import { Sidebar } from "@/components/app/sidebar";
 
-export const metadata: Metadata = { title: { default: "Workspace", template: "%s · saas.tech" } };
+export const metadata: Metadata = { title: { default: "Workspace", template: "%s · saasmodels.tech" } };
 
 function PageSkeleton() {
   return (

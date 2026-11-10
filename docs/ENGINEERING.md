@@ -1,4 +1,4 @@
-# Engineering conventions (saas.tech app)
+# Engineering conventions (saasmodels.tech app)
 
 Read this before changing any module. The product spec is in `docs/MODULES.md`; the competitive audit, plans and country rules are in `docs/AUDIT_PLANS_COUNTRIES.md`.
 

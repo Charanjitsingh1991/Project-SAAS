@@ -25,7 +25,7 @@ export default async function AdminEnquiries(props: PageProps<"/admin/enquiries"
     <>
       <PageHeader
         title="Enquiries"
-        description="Messages from the contact form on saas.tech. Update the status as you follow up."
+        description="Messages from the contact form on saasmodels.tech. Update the status as you follow up."
         tabs={[
           { href: "/admin/enquiries", label: `All (${all.length})`, active: !filter },
           ...STATUSES.map((s) => ({ href: `/admin/enquiries?status=${s}`, label: `${s[0].toUpperCase()}${s.slice(1)} (${count(s)})`, active: filter === s })),

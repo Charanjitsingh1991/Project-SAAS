@@ -13,14 +13,14 @@ const instrument = Instrument_Serif({
 const jetbrains = JetBrains_Mono({ variable: "--font-jetbrains", subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://saas.tech"),
+  metadataBase: new URL("https://saasmodels.tech"),
   title: {
-    default: "saas.tech — HR, CRM, Finance & Operations in one platform",
-    template: "%s · saas.tech",
+    default: "saasmodels.tech — HR, CRM, Finance & Operations in one platform",
+    template: "%s · saasmodels.tech",
   },
   description:
-    "saas.tech brings HRM, CRM, accounting, inventory, payroll and projects into one connected workspace. Replace a dozen tools with one.",
-  openGraph: { title: "saas.tech", description: "Run the whole company from one tab.", url: "https://saas.tech" },
+    "saasmodels.tech brings HRM, CRM, accounting, inventory, payroll and projects into one connected workspace. Replace a dozen tools with one.",
+  openGraph: { title: "saasmodels.tech", description: "Run the whole company from one tab.", url: "https://saasmodels.tech" },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

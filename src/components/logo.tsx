@@ -15,10 +15,10 @@ export function LogoMark({ className }: { className?: string }) {
 
 export function Logo({ className }: { className?: string }) {
   return (
-    <Link href="/" className={cn("group inline-flex items-center gap-2", className)} aria-label="saas.tech home">
+    <Link href="/" className={cn("group inline-flex items-center gap-2", className)} aria-label="saasmodels.tech home">
       <LogoMark className="transition-transform duration-500 ease-out-expo group-hover:rotate-90" />
       <span className="font-display text-[22px] font-bold tracking-tight">
-        saas<span className="text-signal">.</span>tech
+        saasmodels<span className="text-signal">.</span>tech
       </span>
     </Link>
   );

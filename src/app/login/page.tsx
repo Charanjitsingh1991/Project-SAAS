@@ -18,7 +18,7 @@ export default function LoginPage(props: PageProps<"/login">) {
           Welcome <span className="font-serif font-normal italic">back.</span>
         </>
       }
-      subtitle="Log in to your saas.tech workspace."
+      subtitle="Log in to your saasmodels.tech workspace."
     >
       <Suspense fallback={<AuthForm mode="login" />}>
         <LoginForm searchParams={props.searchParams} />

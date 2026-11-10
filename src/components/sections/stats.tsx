@@ -4,10 +4,10 @@ import { animate, motion, useInView } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 
 const STATS = [
-  { value: 2500, suffix: "+", label: "companies run on saas.tech", note: "across 31 countries" },
+  { value: 2500, suffix: "+", label: "companies run on saasmodels.tech", note: "across 31 countries" },
   { value: 68, suffix: "%", label: "lower software spend", note: "vs. their old stack" },
   { value: 9, suffix: " hrs", label: "saved per manager, weekly", note: "median, 2026 survey" },
-  { value: 99.98, suffix: "%", label: "uptime last 12 months", note: "status.saas.tech", decimals: 2 },
+  { value: 99.98, suffix: "%", label: "uptime last 12 months", note: "status.saasmodels.tech", decimals: 2 },
 ];
 
 function Counter({ value, decimals = 0, suffix }: { value: number; decimals?: number; suffix: string }) {

@@ -28,7 +28,7 @@ async function InviteBody({ params }: { params: PageProps<"/invite/[token]">["pa
         <h1 className="text-4xl font-semibold tracking-tight">This invite isn&apos;t valid anymore.</h1>
         <p className="mt-3 text-ink-soft">It may have expired or already been used. Ask your admin for a new link.</p>
         <Link href="/" className="mt-8 inline-block underline underline-offset-4">
-          Back to saas.tech
+          Back to saasmodels.tech
         </Link>
       </>
     );

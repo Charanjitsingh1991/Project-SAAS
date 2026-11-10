@@ -42,7 +42,7 @@ export default async function WebFormPage({ params }: { params: Promise<{ slug: 
           </div>
         </ActionForm>
       </section>
-      <p className="mt-4 text-center text-xs text-ink-mute">Powered by saas.tech</p>
+      <p className="mt-4 text-center text-xs text-ink-mute">Powered by saasmodels.tech</p>
     </main>
   );
 }

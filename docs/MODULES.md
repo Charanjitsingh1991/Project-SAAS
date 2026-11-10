@@ -1,10 +1,10 @@
-# saas.tech — Module Blueprint
+# saasmodels.tech — Module Blueprint
 
 This is the source of truth for how every module behaves. Code must match it.
 
-## 0. Design principles (what makes saas.tech different)
+## 0. Design principles (what makes saasmodels.tech different)
 
-Most suites (Zoho, Odoo, SAP B1, Keka, Freshworks) are separate apps glued together with sync jobs. saas.tech is one database with one ledger.
+Most suites (Zoho, Odoo, SAP B1, Keka, Freshworks) are separate apps glued together with sync jobs. saasmodels.tech is one database with one ledger.
 
 1. **Connected by default.** A business event updates every module it touches, inside the same transaction path. No exports, no "sync", no duplicate entry. Built-in automations (toggleable per workspace):
    - Deal **won** → draft invoice (CRM → Finance) and a project (CRM → Projects).

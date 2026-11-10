@@ -3,7 +3,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { Logo } from "@/components/logo";
 
-export const metadata: Metadata = { title: { default: "Platform admin", template: "%s · Admin · saas.tech" } };
+export const metadata: Metadata = { title: { default: "Platform admin", template: "%s · Admin · saasmodels.tech" } };
 
 const LINKS = [
   { href: "/admin", label: "Workspaces" },

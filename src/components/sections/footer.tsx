@@ -11,14 +11,14 @@ const COLS = [
 ];
 
 export function Footer() {
-  const word = "saas.tech".split("");
+  const word = "saasmodels.tech".split("");
   return (
     <footer className="overflow-hidden pt-24">
       <div className="mx-auto grid max-w-6xl gap-10 px-5 md:grid-cols-12">
         <div className="md:col-span-5">
           <Logo />
           <p className="mt-4 max-w-xs text-ink-soft">The operating system for organizations that are done juggling tools.</p>
-          <p className="mt-6 font-mono text-xs text-ink-mute">hello@saas.tech</p>
+          <p className="mt-6 font-mono text-xs text-ink-mute">hello@saasmodels.tech</p>
         </div>
         {COLS.map((c) => (
           <div key={c.h} className="md:col-span-2">
@@ -38,7 +38,7 @@ export function Footer() {
       </div>
 
       <div className="mx-auto mt-16 flex max-w-6xl flex-wrap justify-between gap-2 border-t border-line px-5 py-6 text-sm text-ink-mute">
-        <span>© 2026 saas.tech</span>
+        <span>© 2026 saasmodels.tech</span>
         <span className="flex gap-4">
           <Link href="/#">Privacy</Link>
           <Link href="/#">Terms</Link>
@@ -60,7 +60,7 @@ export function Footer() {
               show: { y: "12%", transition: { duration: 1, delay: i * 0.05, ease: [0.16, 1, 0.3, 1] } },
             }}
             whileHover={{ y: "0%", transition: { duration: 0.3 } }}
-            className={`inline-block font-display text-[clamp(4rem,19vw,17rem)] font-bold tracking-[-0.06em] ${ch === "." ? "text-signal" : "text-ink"}`}
+            className={`inline-block font-display text-[clamp(2.5rem,11.5vw,10.5rem)] font-bold tracking-[-0.06em] ${ch === "." ? "text-signal" : "text-ink"}`}
           >
             {ch}
           </motion.span>

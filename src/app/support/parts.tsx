@@ -36,7 +36,7 @@ export function PortalShell({ org, children }: { org: { name: string; slug: stri
       <main className="mx-auto w-full max-w-4xl flex-1 px-5 py-10">{children}</main>
       <footer className="border-t border-line py-6">
         <div className="mx-auto flex max-w-4xl items-center justify-center gap-2 px-5 text-xs text-ink-mute">
-          <LogoMark className="size-4" /> Support powered by <span className="font-display font-semibold text-ink">saas.tech</span>
+          <LogoMark className="size-4" /> Support powered by <span className="font-display font-semibold text-ink">saasmodels.tech</span>
         </div>
       </footer>
     </div>
