@@ -30,7 +30,7 @@ export default async function HolidaysPage({ searchParams }: { searchParams: Pro
       <PageHeader
         title="Holidays"
         description="Holidays are skipped when counting leave days and show as non-working in the attendance register."
-        tabs={hrmTabs("holidays")}
+        tabs={hrmTabs(ws, "holidays")}
         actions={
           <div className="flex items-center gap-2 text-sm">
             <Link href={`/app/hrm/holidays?year=${year - 1}`} className="rounded-full border border-line px-3 py-1.5 hover:border-ink">
