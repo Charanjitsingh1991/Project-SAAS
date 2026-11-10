@@ -60,7 +60,7 @@ export function Hero() {
           className="mb-8 inline-flex items-center gap-2 rounded-full border border-ink/15 bg-card/70 py-1 pr-3 pl-1 text-sm"
         >
           <span className="rounded-full bg-signal px-2 py-0.5 font-mono text-[11px] text-white uppercase">v2.0</span>
-          <span className="text-ink-soft">Payroll for 40+ countries just landed</span>
+          <span className="text-ink-soft">Now live for India &amp; UAE — GST, VAT, WPS payroll</span>
         </motion.div>
 
         <h1 className="text-[clamp(3rem,9.6vw,8.6rem)] leading-[0.92] font-bold tracking-[-0.045em]">

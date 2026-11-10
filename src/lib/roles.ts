@@ -8,7 +8,7 @@ export const ROLE_INFO: Record<Role, { label: string; description: string }> = {
   hr: { label: "HR", description: "People, leave, payroll and projects." },
   sales: { label: "Sales", description: "CRM, helpdesk, inventory and projects." },
   finance: { label: "Finance", description: "Accounts, payroll, inventory and analytics." },
-  member: { label: "Employee", description: "Projects and helpdesk." },
+  member: { label: "Employee", description: "My space (leave, attendance, payslips, claims, goals), projects and helpdesk." },
 };
 
 export const MODULE_ACCESS: Record<ModuleKey, Role[]> = {

@@ -16,12 +16,12 @@ const FAQS = [
     a: "Typically 1–3 weeks. We import from spreadsheets, Tally, Zoho, QuickBooks, HubSpot, Salesforce, Keka and SAP Business One for free, and a human checks the mapping with you.",
   },
   {
-    q: "Is it compliant with Indian GST and payroll rules?",
-    a: "Yes — GST invoicing, e-way bills, PF/ESI/PT/TDS and Form 16 are built in. We also support VAT and statutory payroll in 40+ other countries.",
+    q: "Does it handle Indian and UAE tax and payroll?",
+    a: "Yes. India: GST invoices (CGST/SGST/IGST), GST summary, PF, ESI, professional tax and TDS. UAE: 5% VAT invoices, VAT 201 summary, GPSSA, end-of-service gratuity and WPS salary files. Figures are prepared for your accountant to review before filing.",
   },
   {
     q: "Where is our data stored?",
-    a: "In-region data centres (India, EU, US) with encryption at rest and in transit, daily backups and full audit logs. You can export everything at any time.",
+    a: "In a managed cloud database with encryption in transit and at rest, regular backups and an audit log on Enterprise. You can export your data as CSV at any time.",
   },
   {
     q: "Do you offer on-premise deployment?",
