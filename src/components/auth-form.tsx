@@ -7,7 +7,15 @@ import { ArrowUpRight, Eye, EyeOff, Loader2 } from "lucide-react";
 import { login, signup } from "@/app/actions/auth";
 import { Field } from "./ui/field";
 
-export function AuthForm({ mode }: { mode: "login" | "signup" }) {
+export function AuthForm({
+  mode,
+  invite,
+  next,
+}: {
+  mode: "login" | "signup";
+  invite?: { token: string; email: string; orgName: string };
+  next?: string;
+}) {
   const [state, action, pending] = useActionState(mode === "login" ? login : signup, undefined);
   const [show, setShow] = useState(false);
   const v = state?.values ?? {};
@@ -22,13 +30,30 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
       transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
       className="space-y-4"
     >
+      {invite && <input type="hidden" name="invite" value={invite.token} />}
+      {next && <input type="hidden" name="next" value={next} />}
+      {invite && (
+        <p className="rounded-xl bg-lime/60 px-4 py-3 text-sm">
+          You&apos;re joining <b>{invite.orgName}</b>. Create your account with <b>{invite.email}</b>.
+        </p>
+      )}
       {isSignup && (
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Full name" name="name" defaultValue={v.name} errors={state?.errors?.name} autoComplete="name" />
-          <Field label="Company" name="company" defaultValue={v.company} autoComplete="organization" hint={<span className="text-xs text-ink-mute">optional</span>} />
+          <Field label="Full name" name="name" defaultValue={v.name} errors={state?.errors?.name} autoComplete="name" className={invite ? "sm:col-span-2" : undefined} />
+          {!invite && (
+            <Field label="Company" name="company" defaultValue={v.company} autoComplete="organization" hint={<span className="text-xs text-ink-mute">optional</span>} />
+          )}
         </div>
       )}
-      <Field label="Work email" name="email" type="email" defaultValue={v.email} errors={state?.errors?.email} autoComplete="email" />
+      <Field
+        label="Work email"
+        name="email"
+        type="email"
+        defaultValue={invite?.email ?? v.email}
+        readOnly={!!invite}
+        errors={state?.errors?.email}
+        autoComplete="email"
+      />
       <div className="relative">
         <Field
           label="Password"
@@ -66,7 +91,10 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
 
       <p className="pt-2 text-center text-sm text-ink-soft">
         {isSignup ? "Already have an account? " : "New to saas.tech? "}
-        <Link href={isSignup ? "/login" : "/signup"} className="font-medium text-ink underline decoration-signal decoration-2 underline-offset-4">
+        <Link
+          href={isSignup ? (invite ? `/login?next=/invite/${invite.token}` : "/login") : "/signup"}
+          className="font-medium text-ink underline decoration-signal decoration-2 underline-offset-4"
+        >
           {isSignup ? "Log in" : "Create an account"}
         </Link>
       </p>
