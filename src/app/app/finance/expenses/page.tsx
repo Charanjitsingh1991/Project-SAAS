@@ -70,7 +70,7 @@ export default async function ExpensesPage({ searchParams }: PageProps<"/app/fin
         <Stat label="Overdue bills" value={formatMoneyCompact(sum(overdueBills), cur)} hint={`${overdueBills.length} past due date`} tone={overdueBills.length ? "rose" : "mint"} />
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[1fr_340px]">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
         <div className="min-w-0 space-y-6">
           <form action="/app/finance/expenses" className="flex flex-wrap items-end gap-3">
             <Select label="Category" name="category" placeholder="All categories" defaultValue={category} options={allCats.map((c) => ({ value: c, label: EXPENSE_CATEGORY_LABEL[c] ?? c }))} className="w-52" />

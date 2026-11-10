@@ -114,7 +114,7 @@ export default async function DealPage({ params }: { params: Promise<{ id: strin
         )}
       </Card>
 
-      <div className="grid gap-6 xl:grid-cols-[1fr_360px]">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="space-y-6">
           <Card title="Details">
             <DealForm deal={deal} companies={companies} contacts={contacts} members={members} />

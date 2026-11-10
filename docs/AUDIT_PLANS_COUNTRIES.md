@@ -1,61 +1,71 @@
 # Competitive audit, plans & multi-country design
 
-Audit date: Nov 2026. "✅" = already built, "➕" = added in this round.
+Audit date: Nov 2026. "✅" = existed before this round, "➕" = added in this round. Anything not built is listed under **Not built yet** — the app and pricing page don't advertise it.
 
 ## 1. Feature parity by module
 
 | Module | Benchmarked against | What saas.tech has |
 | --- | --- | --- |
-| **HRM** | Keka, greytHR, Zoho People, Bayzat (UAE) | ✅ profiles · departments · org chart · leave + balances + approvals · attendance register + self check-in · holidays · onboarding/offboarding · My space<br>➕ **country-specific statutory IDs** (IN: PAN/UAN/IFSC · AE: Emirates ID, passport, visa, labour card, MOHRE person ID, IBAN)<br>➕ **document vault with expiry alerts** (visa, Emirates ID, passport, licences)<br>➕ **asset management** (assign/return, auto offboarding task)<br>➕ **recruitment / ATS** (job openings → candidate pipeline → hire creates the employee)<br>➕ **performance** (goals with progress + review cycles with ratings)<br>➕ **expense claims** (employee submits → manager approves → reimbursed via payroll or paid directly)<br>➕ configurable **weekend** per workspace · leave **pay %** (half-pay sick leave) · gender-specific leave (maternity/paternity) |
-| **Payroll** | Keka, RazorpayX Payroll, greytHR, Bayzat, Zoho Payroll UAE | ✅ runs draft→approved→paid · LOP from attendance · India PF/ESI/PT/TDS · payslips · bank list<br>➕ **country engines**: India (as before) and **UAE** (basic/housing/transport/other, no income tax, GPSSA pension for UAE nationals 11 %/12.5 %, **end-of-service gratuity accrual**, half-pay leave)<br>➕ **WPS SIF file** (UAE Wage Protection System)<br>➕ **loans & salary advances** with monthly EMI deduction<br>➕ **claim reimbursements** paid through payroll<br>➕ **full & final settlement** (pending salary, leave encashment, gratuity, loan recovery) |
-| **CRM** | Zoho CRM, HubSpot, Freshsales | ✅ companies 360° · contacts · drag-drop pipeline · activities & follow-ups · forecast · lead score · won-deal automation<br>➕ **quotes / estimates** with line items & tax → **convert to invoice** (marks deal won)<br>➕ **web-to-lead form** (public, per workspace)<br>➕ **CSV import** of contacts & companies |
-| **Finance** | Zoho Books, Tally, QuickBooks, Xero | ✅ invoices with tax lines · payments · expenses & bills · double-entry ledger · P&L · balance sheet · trial balance · AR aging · journals<br>➕ **country tax engines**: India GST (CGST+SGST / IGST, GST 2.0 slabs 0/3/5/18/40 %) and **UAE VAT** (5 % standard, zero-rated, exempt, TRN on tax invoices)<br>➕ **VAT return (FTA VAT 201 boxes by emirate)** · GST summary (GSTR-3B style)<br>➕ **UAE corporate tax estimate** (9 % above AED 375,000)<br>➕ **credit notes** (reverse revenue/tax, optional restock)<br>➕ **recurring invoices** · **bank reconciliation** (CSV statement import & match) · **customer statements** |
-| **Inventory** | Zoho Inventory, Odoo, Tally | ✅ multi-warehouse · weighted-average cost · transfers/adjustments · POs · receive → bill · reorder planner · stock-out forecast<br>➕ **stock counts** (cycle count sessions with variance posting) · **CSV import** of products · country tax defaults |
-| **Projects** | Asana, Zoho Projects, ClickUp | ✅ boards · list · Gantt · milestones · timesheets · profitability · bill hours → invoice<br>➕ country-aware billing tax |
-| **Helpdesk** | Freshdesk, Zoho Desk | ✅ SLA timers · internal notes · canned replies · KB · customer portal · CSAT<br>➕ **round-robin auto-assignment** · portal gated by plan |
-| **Analytics** | Zoho Analytics (embedded) | ✅ cross-module dashboard + rule-based insights<br>➕ document-expiry & claim-backlog insights |
+| **HRM** | Keka, greytHR, Zoho People, Bayzat (UAE) | ✅ profiles · departments · org chart · leave + balances + approvals · attendance register + self check-in · holidays · onboarding/offboarding · My space<br>➕ **country-specific employee fields** (IN: PAN/UAN/bank + IFSC, PF/metro · AE: nationality, Emirates ID, passport, visa, labour card, MOHRE person ID, IBAN, routing code, monthly basic/housing/transport/other)<br>➕ **document expiry alerts** (passport, visa, Emirates ID within 60 days) on profile and directory<br>➕ **recruitment / ATS** (openings → candidate kanban → hire creates the employee)<br>➕ **performance** (goals with on-track status, review cycles with self + manager review)<br>➕ **expense claims** (employee submits → manager approves → reimbursed via payroll or paid directly)<br>➕ workspace **weekend** respected by leave and attendance · leave **pay %** (half-pay sick leave) |
+| **Payroll** | Keka, RazorpayX Payroll, greytHR, Bayzat, Zoho Payroll UAE | ✅ runs draft→approved→paid · LOP from attendance · India PF/ESI/PT/TDS · payslips<br>➕ **country engines** behind one breakdown format: India (unchanged maths) and **UAE** (no income tax, GPSSA for UAE nationals, monthly **gratuity accrual** for expats)<br>➕ **WPS SIF file** download for approved UAE runs, with ID/IBAN validation<br>➕ **loans & salary advances** (ledger posting, monthly recovery in payroll)<br>➕ **claim reimbursements** paid through payroll<br>➕ **full & final settlement** (pending salary, leave encashment, gratuity for both countries, loan recovery, printable statement) |
+| **CRM** | Zoho CRM, HubSpot, Freshsales | ✅ companies · contacts · pipeline · activities · forecast · won-deal automation<br>➕ **quotes** with per-line GST/VAT → printable quotation → **convert to invoice** (needs Finance)<br>➕ **web-to-lead form** at `/forms/<workspace>` with bot trap and rate limit |
+| **Finance** | Zoho Books, Tally, QuickBooks, Xero | ✅ invoices · payments · expenses & bills · double-entry ledger · P&L · balance sheet · trial balance · AR aging · journals<br>➕ **country tax**: India GST (CGST+SGST intra-state / IGST inter-state, GSTIN) and **UAE VAT** (5 % standard, zero-rated, exempt, TRN, emirate place of supply)<br>➕ **tax return report**: GSTR-3B-style summary (IN) / VAT 201-style by emirate (AE) + **UAE corporate tax estimate**<br>➕ **credit notes** (optional restock) and **refunds**<br>➕ **recurring invoices** · **bank reconciliation** (CSV import, auto/manual matching)<br>➕ fiscal year follows the workspace (Apr–Mar IN, Jan–Dec AE) |
+| **Inventory** | Zoho Inventory, Odoo, Tally | ✅ multi-warehouse · weighted-average cost · transfers/adjustments · POs · receive → bill · reorder planner<br>➕ **stock counts** with variance posting · warehouse limit per plan · country tax on products/vendors/POs |
+| **Projects** | Asana, Zoho Projects, ClickUp | ✅ boards · list · Gantt · milestones · timesheets · profitability · bill hours → invoice<br>➕ billing time is blocked with an explanation when Finance is off |
+| **Helpdesk** | Freshdesk, Zoho Desk | ✅ SLA timers · internal notes · canned replies · KB · customer portal · CSAT<br>➕ public portal only served when the plan includes it and Helpdesk is on |
+| **Workspace** | — | ➕ **audit log** (Enterprise): filter by module, user, date and text; CSV export |
+
+### Not built yet
+Employee document vault (file uploads) · asset management · CSV import for contacts/companies/products · customer statements · helpdesk round-robin assignment · Abu Dhabi (ADPF) and GCC-national pension schemes · automatic recurring-invoice scheduling (runs on "Run due now").
 
 ## 2. Module choice and plans
 
-Workspaces **choose their modules** (Settings → Modules). A disabled module disappears from navigation, its pages and exports are blocked, and automations that would write into it are skipped. Data is kept, so re-enabling restores everything.
+Workspaces **choose their modules** (Settings → Modules). A disabled module disappears from navigation; its pages, server actions and exports are blocked; automations that would write into it are skipped; cross-module buttons (e.g. "Convert to invoice", "Bill hours") explain why they're unavailable. Data is kept, so re-enabling restores everything.
 
 | | **Starter** | **Growth** | **Enterprise** |
 | --- | --- | --- | --- |
 | Modules | **Pick any 3** of HRM, CRM, Finance, Inventory, Projects, Helpdesk | All 8, including **Payroll & Analytics** | All 8 |
 | Users | up to 25 | unlimited | unlimited |
-| Cross-module automations | — | ✅ | ✅ |
+| Cross-module workflow automations | core only (e.g. invoice → stock) | ✅ | ✅ |
 | Recruitment, performance, expense claims | — | ✅ | ✅ |
-| Quotes, web-to-lead forms, CSV import | quotes + import | ✅ | ✅ |
+| Quotes, stock counts, CSV exports | ✅ | ✅ | ✅ |
+| Web-to-lead forms | — | ✅ | ✅ |
 | Recurring invoices, bank reconciliation | — | ✅ | ✅ |
 | Warehouses | 1 | 5 | unlimited |
 | Customer support portal + public KB | — | ✅ | ✅ |
-| Audit log (full history, filter, export) | — | — | ✅ |
+| Audit log | — | — | ✅ |
 | Workspaces per owner | 1 | 3 | unlimited |
 
-The free trial is the **Growth** plan with every module. Limits are enforced on the server in `src/lib/plans.ts`.
+The free trial runs on **Growth**. Entitlements live in `src/lib/plans.ts`; `requireWorkspace({ module, feature })` in `src/lib/tenancy.ts` guards pages and actions, and `src/lib/entitlements.ts` covers public routes (support portal, web forms).
 
 ## 3. Countries
 
-A workspace has one **country**, chosen at sign-up (auto-detected from the phone prefix +91 / +971). The country sets:
+A workspace has one **country**, chosen at sign-up (auto-detected from the phone prefix +91 / +971) and fixed afterwards. The country sets:
 
 | | 🇮🇳 India (`IN`) | 🇦🇪 United Arab Emirates (`AE`) |
 | --- | --- | --- |
 | Currency / format | INR, en-IN (lakh/crore) | AED, en-AE (fils) |
-| Phone | +91 10-digit mobile | +971 5x xxx xxxx |
-| Regions | 28 states + 8 UTs | 7 emirates |
+| Phone | +91 10-digit mobile | +971 mobile or landline |
+| Regions | states + UTs | 7 emirates |
 | Fiscal year | Apr–Mar | Jan–Dec |
-| Weekend (default, editable) | Sat–Sun | Sat–Sun (federal since 2022) |
-| Indirect tax | GST: 0/3/5/18/40 %; CGST+SGST intra-state, IGST inter-state; GSTIN | VAT 5 % standard, 0 % zero-rated, exempt; TRN (15 digits) |
-| Tax invoice | "Tax Invoice", GSTIN of both parties, place of supply | "Tax Invoice", supplier TRN, customer TRN if registered, VAT in AED |
-| Return report | GST summary (output − ITC, GSTR-3B style) | VAT 201: Box 1a–1g by emirate, Box 4 zero-rated, Box 5 exempt, Box 9 recoverable, net due |
-| Corporate tax | — | 9 % on taxable income above AED 375,000 (estimate) |
-| Salary structure | Basic 50 %, HRA 40/50 %, Special | Basic 60 %, Housing 25 %, Transport 10 %, Other 5 % (overridable per employee) |
-| Statutory deductions | PF 12 % (wage cap ₹15k), ESI 0.75/3.25 % (≤ ₹21k), PT ₹200, TDS (new regime) | No income tax. GPSSA pension for UAE nationals: 11 % employee, 12.5 % employer on basic + housing + transport, floored at AED 3,000 and capped at AED 100,000 |
-| End of service | — | Gratuity: 21 days' basic per year (years 1–5), 30 days per year after; 1-year minimum; capped at 2 years' wage. Accrued monthly as a provision |
-| Salary transfer file | Bank transfer CSV | **WPS SIF** (SCR + EDR records) |
-| Default leave | CL 12 · SL 12 · EL 15 · Maternity 182 · Paternity 15 · LWP | Annual 30 · Sick full-pay 15 · Sick half-pay 30 · Maternity 60 · Parental 5 · Bereavement 5 · Unpaid |
-| Holidays | National + major festivals | New Year, Eid al-Fitr, Arafat, Eid al-Adha, Hijri New Year, Prophet's Birthday, Commemoration Day, National Day (lunar dates tentative) |
-| Employee IDs | PAN, UAN, bank a/c + IFSC | Emirates ID (+ expiry), passport (+ expiry), visa (+ expiry), labour card, MOHRE person ID, IBAN, bank routing code |
-| Workspace statutory IDs | TAN, EPF establishment code, ESIC code | MOHRE establishment ID, WPS bank routing code, trade licence no. |
+| Weekend (default, editable) | Sat–Sun | Sat–Sun |
+| Indirect tax | GST; CGST+SGST intra-state, IGST inter-state; GSTIN | VAT 5 % standard, 0 % zero-rated, exempt; TRN (15 digits) |
+| Return report | GSTR-3B-style summary | VAT 201-style, standard-rated supplies by emirate |
+| Corporate tax | — | 9 % above AED 375,000 (estimate) |
+| Salary structure | Basic 50 %, HRA 40/50 %, Special | Basic/Housing/Transport/Other per employee (default 60/25/10/5 %) |
+| Statutory deductions | PF 12 % (₹15k wage cap), ESI 0.75/3.25 % (≤ ₹21k), PT ₹200, TDS (new regime FY 2025-26) | No income tax. GPSSA for UAE nationals (Decree-Law 57/2023): 11 % employee; employer 12.5 %, or 15 % at AED 20,000+; full contract salary bounded AED 3,000–70,000 |
+| End of service | Gratuity Act: 15/26 × basic × years after 5 years, ₹20 lakh cap (at settlement) | Art. 51: 21 days' basic/yr for 5 years, 30 days after, 1-year minimum, 2-year cap; accrued monthly as a provision (expats only) |
+| Salary transfer file | Bank transfer CSV | **WPS SIF** (EDR per employee + SCR) |
+| Workspace statutory IDs | TAN, EPF, ESIC codes | MOHRE establishment ID, WPS routing code, trade licence |
 
-All country rules live in `src/lib/countries/` and are the only place that knows about a specific country. A new country means adding a pack and a payroll engine; the modules themselves don't change.
+All country rules live in `src/lib/countries/`, `src/lib/payroll.ts` (IN) and `src/lib/payroll-ae.ts` (AE).
+
+### Compliance caveats
+Calculations follow the rules above and are covered by tests, but they are **estimates for review, not filed returns or legal advice**. Islamic holiday dates are tentative. ADPF/GCC pension schemes, UAE reverse charge/tourist refunds, and India's old tax regime aren't modelled. Have a local accountant validate the figures before production use.
+
+## 4. Verification
+
+- `npm test` — unit tests for both payroll engines, gratuity, WPS SIF, settlements, plans/automations, finance tax returns and bank matching, CRM quotes, HRM validation and people workflows.
+- `npm run smoke` — creates an India and a UAE workspace on a throwaway DB copy, checks country defaults, runs payroll with a claim and an advance through payment, and asserts the ledger balances with payables matching payslips.
+- Browser check (UAE): sign-up with +971 picks UAE/AED; settings show emirate/TRN/MOHRE/WPS fields; employee form shows UAE fields with visa-expiry warning; payroll run shows GPSSA and gratuity correctly.
+- Stripe billing was deliberately not exercised in this audit.

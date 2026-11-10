@@ -118,7 +118,7 @@ export default async function OverviewPage(props: PageProps<"/app">) {
           ))}
       </div>
 
-      <div className="mt-6 grid gap-6 xl:grid-cols-[1fr_380px]">
+      <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
         <Card title="Your modules">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {MODULES.filter((m) => roleCanUse(ws.role, m.key as ModuleKey)).map((m) => {

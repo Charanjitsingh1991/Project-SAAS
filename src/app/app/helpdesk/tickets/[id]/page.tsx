@@ -59,7 +59,7 @@ export default async function TicketPage({ params }: PageProps<"/app/helpdesk/ti
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="min-w-0 space-y-4">
           <div className="space-y-3">
             {messages.length === 0 && <p className="rounded-2xl border border-dashed border-ink/20 p-6 text-center text-sm text-ink-soft">No messages yet.</p>}

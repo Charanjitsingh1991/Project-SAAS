@@ -66,7 +66,7 @@ export default async function RecurringPage() {
         </>,
       )}
 
-      <div className="grid gap-6 xl:grid-cols-[1fr_340px]">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
         <Card>
           {schedules.length === 0 ? (
             <EmptyState title="No recurring schedules">Create a new recurring invoice, or repeat an existing one.</EmptyState>

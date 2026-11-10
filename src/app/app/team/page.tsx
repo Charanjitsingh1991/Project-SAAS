@@ -39,7 +39,7 @@ export default async function TeamPage() {
     <>
       <PageHeader title="Team & roles" description="Invite your employees and decide which modules each person can open." />
 
-      <div className="grid gap-6 xl:grid-cols-[1fr_360px]">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="space-y-6">
           <Card title={`Members (${members.length})`}>
             <Table>

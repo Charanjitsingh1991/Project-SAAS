@@ -21,7 +21,7 @@ export default async function AccountsPage() {
   return (
     <>
       <PageHeader title="Chart of accounts" description="Every posting lands on one of these accounts. Add your own for finer reporting." tabs={FINANCE_TABS("accounts")} />
-      <div className="grid gap-6 xl:grid-cols-[1fr_320px]">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
         <Card>
           <Table>
             <thead>

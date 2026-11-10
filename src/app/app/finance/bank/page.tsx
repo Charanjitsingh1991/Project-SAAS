@@ -96,7 +96,7 @@ export default async function BankPage({ searchParams }: PageProps<"/app/finance
         <Stat label="To reconcile" value={`${unmatchedLines.length} · ${openToDate.length}`} hint="Statement lines · ledger items" tone="butter" />
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[1fr_340px]">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
         <div className="min-w-0 space-y-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap gap-1.5">
