@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { blob, index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 /*
  * Conventions:
@@ -28,6 +28,8 @@ export const users = sqliteTable("users", {
   company: text("company"),
   phone: text("phone"), // E.164, e.g. +971501234567
   passwordHash: text("password_hash").notNull(),
+  /** Google account subject id when the user signs in with Google. */
+  googleId: text("google_id").unique(),
   createdAt: createdAt(),
 });
 
@@ -55,6 +57,11 @@ export const organizations = sqliteTable("organizations", {
   fiscalYearStart: integer("fiscal_year_start").notNull().default(4),
   /** JSON object of country-specific employer IDs (e.g. MOHRE establishment ID, WPS routing code, TAN, EPF code). */
   statutory: text("statutory").notNull().default("{}"),
+  /** SHA-256 of the token biometric devices use to post punches to /api/attendance/punch. */
+  attendanceTokenHash: text("attendance_token_hash"),
+  /** Helpdesk: auto-assign new tickets round-robin to agents. */
+  helpdeskAutoAssign: integer("helpdesk_auto_assign", { mode: "boolean" }).notNull().default(false),
+  helpdeskLastAssignee: integer("helpdesk_last_assignee"),
   ownerId: integer("owner_id").notNull(),
   plan: text("plan", { enum: ["starter", "growth", "enterprise"] }).notNull().default("growth"),
   trialStartedAt: integer("trial_started_at", { mode: "timestamp" }).notNull(),
@@ -208,6 +215,7 @@ export const employees = sqliteTable(
     iban: text("iban"),
     bankName: text("bank_name"),
     bankRoutingCode: text("bank_routing_code"),
+    shiftId: integer("shift_id"),
     createdAt: createdAt(),
   },
   (t) => [index("employees_org").on(t.orgId), uniqueIndex("employee_org_code").on(t.orgId, t.code)],
@@ -252,6 +260,11 @@ export const leaveTypes = sqliteTable("leave_types", {
   /** Share of salary paid on this leave: 100 full, 50 half-pay (0.5 LOP per day), 0 unpaid. */
   payPercent: integer("pay_percent").notNull().default(100),
   appliesTo: text("applies_to", { enum: ["all", "female", "male"] }).notNull().default("all"),
+  /** "annual" = full quota on 1 Jan; "monthly" = quota/12 credited each month. */
+  accrual: text("accrual", { enum: ["annual", "monthly"] }).notNull().default("annual"),
+  /** Max unused days carried into the next year (0 = none). */
+  carryForwardMax: real("carry_forward_max").notNull().default(0),
+  encashable: integer("encashable", { mode: "boolean" }).notNull().default(false),
   color: text("color").notNull().default("mint"),
   active: integer("active", { mode: "boolean" }).notNull().default(true),
 });
@@ -294,6 +307,9 @@ export const attendance = sqliteTable(
     status: text("status", { enum: ATTENDANCE_STATUSES }).notNull(),
     checkIn: text("check_in"), // HH:MM
     checkOut: text("check_out"),
+    /** Minutes late against the employee shift (0 = on time). */
+    lateMinutes: integer("late_minutes").notNull().default(0),
+    source: text("source", { enum: ["web", "device", "regularized", "manual", "leave"] }).notNull().default("manual"),
     note: text("note"),
     /** Set when the row was created by an approved leave request. */
     leaveRequestId: integer("leave_request_id"),
@@ -982,6 +998,9 @@ export const employeeDocuments = sqliteTable(
     issueDate: text("issue_date"),
     expiryDate: text("expiry_date"),
     note: text("note"),
+    fileId: integer("file_id"),
+    /** Visible to the employee in My space. */
+    shared: integer("shared", { mode: "boolean" }).notNull().default(true),
     createdAt: createdAt(),
   },
   (t) => [index("emp_docs_emp").on(t.employeeId), index("emp_docs_expiry").on(t.orgId, t.expiryDate)],
@@ -1352,6 +1371,216 @@ export const stockCountLines = sqliteTable(
 );
 
 export type User = typeof users.$inferSelect;
+
+/* ═════════════ Launch features: auth, notifications, files ═════════════ */
+
+export const passwordResets = sqliteTable("password_resets", {
+  id: id(),
+  userId: integer("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  tokenHash: text("token_hash").notNull().unique(),
+  expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+  usedAt: integer("used_at", { mode: "timestamp" }),
+  createdAt: createdAt(),
+});
+
+export const notifications = sqliteTable(
+  "notifications",
+  {
+    id: id(),
+    orgId: orgId(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(), // leave.requested, leave.decided, claim.decided, payslip.published, announcement, …
+    title: text("title").notNull(),
+    body: text("body"),
+    href: text("href"),
+    readAt: integer("read_at", { mode: "timestamp" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("notifications_user").on(t.userId, t.readAt)],
+);
+
+/** Uploaded files stored in the database (documents, letters, proofs). Capped at 5 MB each. */
+export const files = sqliteTable(
+  "files",
+  {
+    id: id(),
+    orgId: orgId(),
+    name: text("name").notNull(),
+    mime: text("mime").notNull(),
+    size: integer("size").notNull(),
+    data: blob("data", { mode: "buffer" }).notNull(),
+    uploadedBy: integer("uploaded_by"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("files_org").on(t.orgId)],
+);
+
+/* ═════════════ Launch features: attendance & leave ═════════════ */
+
+export const shifts = sqliteTable("shifts", {
+  id: id(),
+  orgId: orgId(),
+  name: text("name").notNull(),
+  startTime: text("start_time").notNull(), // HH:MM
+  endTime: text("end_time").notNull(),
+  graceMinutes: integer("grace_minutes").notNull().default(15),
+  /** Worked minutes below which the day counts as a half day (0 = off). */
+  halfDayMinutes: integer("half_day_minutes").notNull().default(0),
+  isDefault: integer("is_default", { mode: "boolean" }).notNull().default(false),
+  active: integer("active", { mode: "boolean" }).notNull().default(true),
+});
+
+export const REQUEST_STATUSES = ["pending", "approved", "rejected", "cancelled"] as const;
+
+export const attendanceRegularizations = sqliteTable(
+  "attendance_regularizations",
+  {
+    id: id(),
+    orgId: orgId(),
+    employeeId: integer("employee_id")
+      .notNull()
+      .references(() => employees.id, { onDelete: "cascade" }),
+    date: text("date").notNull(),
+    checkIn: text("check_in"),
+    checkOut: text("check_out"),
+    status: text("status", { enum: ["present", "wfh", "half_day"] }).notNull().default("present"),
+    reason: text("reason").notNull(),
+    state: text("state", { enum: REQUEST_STATUSES }).notNull().default("pending"),
+    decidedBy: integer("decided_by"),
+    decidedAt: integer("decided_at", { mode: "timestamp" }),
+    decisionNote: text("decision_note"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("regularization_emp").on(t.employeeId), index("regularization_org_state").on(t.orgId, t.state)],
+);
+
+/** Compensatory off earned by working on a weekend/holiday; approved credits add to the comp-off leave balance. */
+export const compOffCredits = sqliteTable(
+  "comp_off_credits",
+  {
+    id: id(),
+    orgId: orgId(),
+    employeeId: integer("employee_id")
+      .notNull()
+      .references(() => employees.id, { onDelete: "cascade" }),
+    workedDate: text("worked_date").notNull(),
+    days: real("days").notNull().default(1),
+    reason: text("reason").notNull(),
+    state: text("state", { enum: REQUEST_STATUSES }).notNull().default("pending"),
+    expiresOn: text("expires_on"),
+    decidedBy: integer("decided_by"),
+    decidedAt: integer("decided_at", { mode: "timestamp" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("compoff_emp").on(t.employeeId)],
+);
+
+/* ═════════════ Launch features: letters, engagement ═════════════ */
+
+export const LETTER_KINDS = ["offer", "appointment", "confirmation", "salary_certificate", "experience", "relieving", "noc", "custom"] as const;
+
+export const letterTemplates = sqliteTable("letter_templates", {
+  id: id(),
+  orgId: orgId(),
+  kind: text("kind", { enum: LETTER_KINDS }).notNull(),
+  name: text("name").notNull(),
+  /** Plain text with {{placeholders}}; blank lines separate paragraphs. */
+  body: text("body").notNull(),
+  createdAt: createdAt(),
+});
+
+export const employeeLetters = sqliteTable(
+  "employee_letters",
+  {
+    id: id(),
+    orgId: orgId(),
+    employeeId: integer("employee_id")
+      .notNull()
+      .references(() => employees.id, { onDelete: "cascade" }),
+    templateId: integer("template_id"),
+    kind: text("kind", { enum: LETTER_KINDS }).notNull(),
+    title: text("title").notNull(),
+    body: text("body").notNull(), // rendered text
+    issuedBy: integer("issued_by"),
+    issuedOn: text("issued_on").notNull(),
+    shared: integer("shared", { mode: "boolean" }).notNull().default(true),
+    createdAt: createdAt(),
+  },
+  (t) => [index("letters_emp").on(t.employeeId)],
+);
+
+export const announcements = sqliteTable(
+  "announcements",
+  {
+    id: id(),
+    orgId: orgId(),
+    title: text("title").notNull(),
+    body: text("body").notNull(),
+    pinned: integer("pinned", { mode: "boolean" }).notNull().default(false),
+    /** null = everyone; otherwise a department id. */
+    departmentId: integer("department_id"),
+    expiresOn: text("expires_on"),
+    createdBy: integer("created_by").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("announcements_org").on(t.orgId, t.createdAt)],
+);
+
+export const polls = sqliteTable("polls", {
+  id: id(),
+  orgId: orgId(),
+  question: text("question").notNull(),
+  options: text("options").notNull(), // JSON string[]
+  anonymous: integer("anonymous", { mode: "boolean" }).notNull().default(true),
+  closesOn: text("closes_on"),
+  createdBy: integer("created_by").notNull(),
+  createdAt: createdAt(),
+});
+
+export const pollVotes = sqliteTable(
+  "poll_votes",
+  {
+    id: id(),
+    orgId: orgId(),
+    pollId: integer("poll_id")
+      .notNull()
+      .references(() => polls.id, { onDelete: "cascade" }),
+    userId: integer("user_id").notNull(),
+    option: integer("option").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("poll_vote_user").on(t.pollId, t.userId)],
+);
+
+/* ═════════════ Launch features: India income-tax declarations ═════════════ */
+
+export const taxDeclarations = sqliteTable(
+  "tax_declarations",
+  {
+    id: id(),
+    orgId: orgId(),
+    employeeId: integer("employee_id")
+      .notNull()
+      .references(() => employees.id, { onDelete: "cascade" }),
+    fiscalYear: text("fiscal_year").notNull(), // "2026-27"
+    regime: text("regime", { enum: ["new", "old"] }).notNull().default("new"),
+    /** JSON: { sec80c, sec80d, sec80ccd1b, homeLoanInterest, rentPaidMonthly, otherDeductions } in minor units. */
+    items: text("items").notNull().default("{}"),
+    /** JSON number[] of file ids for proofs. */
+    proofFileIds: text("proof_file_ids").notNull().default("[]"),
+    state: text("state", { enum: ["draft", "submitted", "approved", "rejected"] }).notNull().default("draft"),
+    reviewedBy: integer("reviewed_by"),
+    reviewNote: text("review_note"),
+    updatedAt: integer("updated_at", { mode: "timestamp" }),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("tax_decl_emp_fy").on(t.employeeId, t.fiscalYear)],
+);
+
 export type Organization = typeof organizations.$inferSelect;
 export type Enquiry = typeof enquiries.$inferSelect;
 export type Employee = typeof employees.$inferSelect;
