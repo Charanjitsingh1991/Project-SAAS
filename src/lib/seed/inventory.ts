@@ -10,26 +10,75 @@ import { nextNumber } from "@/lib/sequence";
 import { defaultWarehouseId, moveStock } from "@/lib/stock";
 
 const DAY = 86_400_000;
-const inr = (n: number) => Math.round(n * 100);
+const minor = (n: number) => Math.round(n * 100);
+
+type VendorSeed = { name: string; email: string; phone: string; gstin: string; address: string };
+
+const LOCAL: Record<
+  CountryCode,
+  { warehouse: { name: string; code: string; address: string }; vendors: VendorSeed[]; barcodePrefix: string; fitOutNote: string; prices?: Record<string, [cost: number, price: number]> }
+> = {
+  IN: {
+    warehouse: { name: "Bengaluru WH", code: "BLR", address: "Plot 14, Peenya Industrial Area, Bengaluru 560058" },
+    vendors: [
+      { name: "TechSource Distribution", email: "orders@techsource.example", phone: "+91 98100 11001", gstin: "07AAACT1234F1Z5", address: "Nehru Place, New Delhi 110019" },
+      { name: "Urban Workspace Furnishings", email: "sales@urbanworkspace.example", phone: "+91 98450 22002", gstin: "29AABCU5678K1Z2", address: "Whitefield, Bengaluru 560066" },
+      { name: "OfficeMart Supplies", email: "bulk@officemart.example", phone: "+91 98200 33003", gstin: "27AAECO9012L1ZP", address: "Andheri East, Mumbai 400093" },
+      { name: "PackRight Industries", email: "care@packright.example", phone: "+91 98400 44004", gstin: "33AAFCP3456M1ZV", address: "Ambattur, Chennai 600058" },
+      { name: "Gadget Wholesale Co.", email: "hello@gadgetwholesale.example", phone: "+91 98760 55005", gstin: "06AAHCG7890N1ZQ", address: "Sector 18, Gurugram 122015" },
+    ],
+    barcodePrefix: "89012",
+    fitOutNote: "Bengaluru office fit-out.",
+  },
+  AE: {
+    warehouse: { name: "Abu Dhabi WH", code: "AUH", address: "Plot 22, Mussafah Industrial Area M-14, Abu Dhabi" },
+    vendors: [
+      { name: "TechSource Distribution FZE", email: "orders@techsource.example", phone: "+971 4 299 1001", gstin: "100112233400003", address: "Warehouse 7, Jebel Ali Free Zone, Dubai" },
+      { name: "Urban Workspace Furnishings LLC", email: "sales@urbanworkspace.example", phone: "+971 4 340 2002", gstin: "100223344500003", address: "Al Quoz Industrial Area 3, Dubai" },
+      { name: "OfficeMart Supplies Trading", email: "bulk@officemart.example", phone: "+971 4 266 3003", gstin: "100334455600003", address: "Al Qusais Industrial Area 2, Dubai" },
+      { name: "PackRight Industries LLC", email: "care@packright.example", phone: "+971 6 534 4004", gstin: "100445566700003", address: "Industrial Area 13, Sharjah" },
+      { name: "Gadget Wholesale Co. LLC", email: "hello@gadgetwholesale.example", phone: "+971 4 225 5005", gstin: "100556677800003", address: "Al Fahidi Street, Bur Dubai, Dubai" },
+    ],
+    barcodePrefix: "62912",
+    fitOutNote: "Abu Dhabi office fit-out.",
+    // AED [cost, selling price]
+    prices: {
+      "ELEC-001": [25, 45],
+      "ELEC-002": [140, 229],
+      "ELEC-003": [650, 899],
+      "ELEC-004": [55, 99],
+      "ELEC-005": [90, 149],
+      "FURN-001": [380, 599],
+      "FURN-002": [950, 1450],
+      "FURN-003": [420, 690],
+      "CONS-001": [14, 22],
+      "CONS-002": [18, 29],
+      "CONS-003": [210, 320],
+      "CONS-004": [9, 15],
+      "PACK-001": [2.5, 4.5],
+      "PACK-002": [35, 55],
+      "PACK-003": [4, 7.5],
+    },
+  },
+};
 
 /** Sample inventory: warehouses, vendors, products with stock history, three POs and a transfer. */
 export async function seedInventory(ctx: Ctx): Promise<void> {
   const orgId = ctx.orgId;
+  const [org] = await db.select({ country: schema.organizations.country }).from(schema.organizations).where(eq(schema.organizations.id, orgId)).limit(1);
+  const country = packOf(org ?? {});
+  const local = LOCAL[country.code];
+  // Authored rates are Indian GST slabs; other countries use their standard rate.
+  const rate = (gst: number) => (country.code === "IN" ? gst : defaultTaxRate(country));
   const main = await defaultWarehouseId(orgId);
   const [blr] = await db
     .insert(schema.warehouses)
-    .values({ orgId, name: "Bengaluru WH", code: "BLR", address: "Plot 14, Peenya Industrial Area, Bengaluru 560058", isDefault: false })
+    .values({ orgId, ...local.warehouse, isDefault: false })
     .returning({ id: schema.warehouses.id });
 
   const vendorRows = await db
     .insert(schema.vendors)
-    .values([
-      { orgId, name: "TechSource Distribution", email: "orders@techsource.example", phone: "+91 98100 11001", gstin: "07AAACT1234F1Z5", address: "Nehru Place, New Delhi 110019" },
-      { orgId, name: "Urban Workspace Furnishings", email: "sales@urbanworkspace.example", phone: "+91 98450 22002", gstin: "29AABCU5678K1Z2", address: "Whitefield, Bengaluru 560066" },
-      { orgId, name: "OfficeMart Supplies", email: "bulk@officemart.example", phone: "+91 98200 33003", gstin: "27AAECO9012L1ZP", address: "Andheri East, Mumbai 400093" },
-      { orgId, name: "PackRight Industries", email: "care@packright.example", phone: "+91 98400 44004", gstin: "33AAFCP3456M1ZV", address: "Ambattur, Chennai 600058" },
-      { orgId, name: "Gadget Wholesale Co.", email: "hello@gadgetwholesale.example", phone: "+91 98760 55005", gstin: "06AAHCG7890N1ZQ", address: "Sector 18, Gurugram 122015" },
-    ])
+    .values(local.vendors.map((v) => ({ orgId, ...v })))
     .returning({ id: schema.vendors.id });
   const [tech, furn, office, pack, gadget] = vendorRows.map((v) => v.id);
 
@@ -51,6 +100,12 @@ export async function seedInventory(ctx: Ctx): Promise<void> {
     { sku: "PACK-002", name: "Bubble Wrap Roll (50 m)", category: "Packaging", cost: 520, price: 799, gst: 18, rl: 12, rq: 30, vendor: pack, open: 35, unit: "pcs" },
     { sku: "PACK-003", name: "Packing Tape (48 mm)", category: "Packaging", cost: 65, price: 110, gst: 18, rl: 60, rq: 200, vendor: pack, open: 220, openBlr: 80 },
   ];
+  const baseCost = Object.fromEntries(defs.map((d) => [d.sku, d.cost]));
+  if (local.prices) {
+    for (const d of defs) [d.cost, d.price] = local.prices[d.sku];
+  }
+  /** PO costs are authored against Indian list prices; keep the same relative deviation elsewhere. */
+  const poCost = (sku: string, authored: number) => (local.prices ? Math.round((local.prices[sku][0] * authored * 100) / baseCost[sku]) / 100 : authored);
 
   const ids: Record<string, number> = {};
   for (const d of defs) {
