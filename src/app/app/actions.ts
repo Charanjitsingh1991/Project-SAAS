@@ -9,6 +9,9 @@ import { db, schema } from "@/db";
 import { getCurrentUser } from "@/lib/dal";
 import type { FormState } from "@/lib/definitions";
 import { createOrganization } from "@/lib/org";
+import { ctxOf, logActivity } from "@/lib/activity";
+import { AUTOMATIONS } from "@/lib/automations";
+import { formObject } from "@/lib/format";
 import { seedWorkspace } from "@/lib/seed";
 import { ORG_COOKIE, requireWorkspace } from "@/lib/tenancy";
 
@@ -41,6 +44,35 @@ export async function switchWorkspace(fd: FormData) {
 
 export async function loadSampleData() {
   const ws = await requireWorkspace({ manage: true });
-  await seedWorkspace(ws.org.id);
+  await seedWorkspace({ orgId: ws.org.id, userId: ws.user.id });
   refresh();
+}
+
+export async function saveAutomations(fd: FormData) {
+  const ws = await requireWorkspace({ manage: true });
+  const settings = Object.fromEntries(AUTOMATIONS.map((a) => [a.key, fd.get(a.key) === "on"]));
+  await db.update(schema.organizations).set({ automations: JSON.stringify(settings) }).where(eq(schema.organizations.id, ws.org.id));
+  await logActivity(ctxOf(ws), { module: "workspace", entityType: "settings", action: "updated", summary: "Updated automation settings" });
+  refresh();
+}
+
+export async function saveCompanyProfile(_: FormState, fd: FormData): Promise<FormState> {
+  const ws = await requireWorkspace({ manage: true });
+  const parsed = z
+    .object({
+      state: z.string().max(80).optional(),
+      gstin: z
+        .string()
+        .regex(/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/, "Invalid GSTIN format.")
+        .optional(),
+      address: z.string().max(300).optional(),
+    })
+    .safeParse(formObject(fd));
+  if (!parsed.success) return { errors: z.flattenError(parsed.error).fieldErrors };
+  await db
+    .update(schema.organizations)
+    .set({ state: parsed.data.state ?? null, gstin: parsed.data.gstin ?? null, address: parsed.data.address ?? null })
+    .where(eq(schema.organizations.id, ws.org.id));
+  refresh();
+  return { ok: true, message: "Company details saved." };
 }
