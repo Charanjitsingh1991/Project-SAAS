@@ -1,5 +1,7 @@
 /** Pure Finance helpers (client-safe, no DB). */
 import type { AccountType } from "./accounting";
+import { taxOption, type CountryPack, type TaxRateOption } from "./countries";
+import type { TaxSplitLine } from "./countries/types";
 
 export const AGING_BUCKETS = ["current", "1-30", "31-60", "61-90", "90+"] as const;
 export type AgingBucket = (typeof AGING_BUCKETS)[number];
@@ -44,6 +46,45 @@ export function taxByRate(lines: { taxRate: number; amount: number; taxAmount: n
     m.set(l.taxRate, row);
   }
   return [...m.values()].sort((a, b) => a.rate - b.rate);
+}
+
+/** Tax option of a stored line. Legacy lines whose rate is no longer in the pack keep their own rate. */
+export function lineTaxOption(pack: CountryPack, code: string | null | undefined, rate: number): TaxRateOption {
+  const opt = taxOption(pack, code, rate);
+  if (opt.kind === "standard" && opt.rate !== rate) {
+    return { code: `${pack.tax.name}${rate}`, rate, label: `${pack.tax.name} ${rate}%`, kind: rate > 0 ? "standard" : "zero" };
+  }
+  return opt;
+}
+
+export type TaxLineLike = { taxCode?: string | null; taxRate: number; amount: number; taxAmount: number };
+export type TaxSummaryRow = { code: string; label: string; rate: number; kind: "standard" | "zero" | "exempt"; taxable: number; tax: number; split: TaxSplitLine[] };
+
+/**
+ * Country-aware tax breakdown of document lines: one row per tax code with the pack's split
+ * (India CGST+SGST / IGST, UAE single VAT line), plus totals per split label in first-seen order.
+ */
+export function taxSummary(pack: CountryPack, lines: TaxLineLike[], placeOfSupply: string | null | undefined, orgRegion: string | null | undefined) {
+  const byCode = new Map<string, TaxSummaryRow>();
+  for (const l of lines) {
+    const opt = lineTaxOption(pack, l.taxCode, l.taxRate);
+    const row = byCode.get(opt.code) ?? { code: opt.code, label: opt.label, rate: opt.rate, kind: opt.kind, taxable: 0, tax: 0, split: [] };
+    row.taxable += l.amount;
+    row.tax += l.taxAmount;
+    byCode.set(opt.code, row);
+  }
+  const rows = [...byCode.values()].sort((a, b) => b.rate - a.rate || a.code.localeCompare(b.code));
+  const totals = new Map<string, number>();
+  for (const r of rows) {
+    r.split = pack.tax.split(r.tax, r.rate, placeOfSupply, orgRegion);
+    for (const s of r.split) totals.set(s.label, (totals.get(s.label) ?? 0) + s.amount);
+  }
+  return { rows, totals: [...totals.entries()].map(([label, amount]) => ({ label, amount })) };
+}
+
+/** Remove spaces/dashes and upper-case a tax registration number before validating it. */
+export function normalizeTaxId(v: string) {
+  return v.replace(/[\s-]/g, "").toUpperCase();
 }
 
 /** Display status: sent/partial invoices past their due date are "overdue". */

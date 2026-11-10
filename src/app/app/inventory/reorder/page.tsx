@@ -4,7 +4,7 @@ import { Card, EmptyState, PageHeader, Table, Td, Th } from "@/components/app/ui
 import { formatMoney } from "@/lib/format";
 import { fmtQty, groupByVendor, isLowStock, suggestedQty } from "@/lib/inventory";
 import { getProductsWithStock, getVendors } from "@/lib/inventory-data";
-import { requireWorkspace } from "@/lib/tenancy";
+import { packFor, requireWorkspace } from "@/lib/tenancy";
 import { SubmitButton } from "@/components/app/forms";
 import { createDraftPoFromReorder } from "../actions";
 import { ErrorBanner, Qty, filterInput } from "../_components/parts";
@@ -97,7 +97,7 @@ export default async function ReorderPage({ searchParams }: { searchParams: Prom
                       </tr>
                     ))}
                     <tr>
-                      <Td className="font-medium" >Total (excl. GST)</Td>
+                      <Td className="font-medium">Total (excl. {packFor(ws).tax.name})</Td>
                       <Td /> <Td /> <Td /> <Td />
                       <Td className="text-right font-semibold tabular-nums">{formatMoney(total, cur)}</Td>
                     </tr>

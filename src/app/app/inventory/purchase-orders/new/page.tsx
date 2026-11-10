@@ -2,9 +2,10 @@ import type { Metadata } from "next";
 import { Card, EmptyState, PageHeader } from "@/components/app/ui";
 import { fromMinor, todayYmd } from "@/lib/format";
 import { getProductsWithStock, getVendors, getWarehouses } from "@/lib/inventory-data";
-import { requireWorkspace } from "@/lib/tenancy";
+import { packFor, requireWorkspace } from "@/lib/tenancy";
 import { createPurchaseOrder } from "../../actions";
 import { PoForm } from "../../_components/po-form";
+import { inventoryTax } from "../../_components/tax";
 import { INVENTORY_TABS } from "../../tabs";
 
 export const metadata: Metadata = { title: "New purchase order" };
@@ -30,6 +31,7 @@ export default async function NewPurchaseOrderPage({ searchParams }: { searchPar
             currency={ws.org.currency}
             initial={{ vendorId, warehouseId: warehouses[0]?.id, orderDate: todayYmd() }}
             submitLabel="Create draft PO"
+            tax={inventoryTax(packFor(ws))}
           />
         </Card>
       )}

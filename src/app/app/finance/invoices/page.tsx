@@ -5,7 +5,7 @@ import { Card, EmptyState, PageHeader, StatusBadge, Table, Td, Th } from "@/comp
 import { db, schema } from "@/db";
 import { invoiceDisplayStatus } from "@/lib/finance-utils";
 import { daysBetween, formatDate, formatMoney, todayYmd } from "@/lib/format";
-import { requireWorkspace } from "@/lib/tenancy";
+import { packFor, requireWorkspace } from "@/lib/tenancy";
 import { cn } from "@/lib/utils";
 import { FINANCE_TABS } from "../tabs";
 
@@ -38,7 +38,7 @@ export default async function InvoicesPage({ searchParams }: PageProps<"/app/fin
     <>
       <PageHeader
         title="Invoices"
-        description="GST-ready invoices with automatic numbering, ledger posting and payment tracking."
+        description={`${packFor(ws).tax.name}-ready invoices with automatic numbering, ledger posting, credit notes and payment tracking.`}
         tabs={FINANCE_TABS("invoices")}
         actions={
           <>
@@ -114,7 +114,7 @@ export default async function InvoicesPage({ searchParams }: PageProps<"/app/fin
                     <Td className="whitespace-nowrap">{formatDate(i.dueDate)}</Td>
                     <Td className={cn("text-right tabular-nums", late > 0 && "font-medium text-signal")}>{late > 0 ? late : "—"}</Td>
                     <Td className="text-right tabular-nums">{formatMoney(i.total, cur)}</Td>
-                    <Td className="text-right tabular-nums">{i.status === "void" ? "—" : formatMoney(i.total - i.amountPaid, cur)}</Td>
+                    <Td className="text-right tabular-nums">{i.status === "void" ? "—" : formatMoney(i.total - i.amountPaid - i.amountCredited, cur)}</Td>
                     <Td>
                       <StatusBadge value={i.display} />
                     </Td>

@@ -19,14 +19,21 @@ export function PoLinesEditor({
   currency = "INR",
   name = "lines",
   error,
+  rates = GST_RATES,
+  taxName = "GST",
+  defaultRate = 18,
 }: {
   products: PoEditorProduct[];
   initial?: PoEditorLine[];
   currency?: string;
   name?: string;
   error?: string;
+  /** Country tax rates (percent); defaults to India GST slabs. */
+  rates?: readonly number[];
+  taxName?: string;
+  defaultRate?: number;
 }) {
-  const seed = initial?.length ? initial : [{ productId: 0, quantity: 1, unitCost: 0, taxRate: 18 }];
+  const seed = initial?.length ? initial : [{ productId: 0, quantity: 1, unitCost: 0, taxRate: defaultRate }];
   const [counter, setCounter] = useState(seed.length);
   const [rows, setRows] = useState<Row[]>(() =>
     seed.map((l, i) => ({
@@ -65,7 +72,7 @@ export function PoLinesEditor({
     })),
   );
 
-  const rateOptions = [...new Set<number>([...GST_RATES, ...rows.map((r) => Number(r.taxRate))])].sort((a, b) => a - b);
+  const rateOptions = [...new Set<number>([...rates, ...rows.map((r) => Number(r.taxRate))])].sort((a, b) => a - b);
 
   return (
     <div>
@@ -77,7 +84,7 @@ export function PoLinesEditor({
               <th className="pb-2 pr-2 font-normal">Product</th>
               <th className="w-24 pb-2 pr-2 font-normal">Qty</th>
               <th className="w-32 pb-2 pr-2 font-normal">Unit cost</th>
-              <th className="w-24 pb-2 pr-2 font-normal">GST %</th>
+              <th className="w-24 pb-2 pr-2 font-normal">{taxName} %</th>
               <th className="w-32 pb-2 pr-2 text-right font-normal">Line total</th>
               <th className="w-8 pb-2" />
             </tr>
@@ -102,7 +109,7 @@ export function PoLinesEditor({
                   <input aria-label="Unit cost" inputMode="decimal" value={r.unitCost} onChange={(e) => patch(r.key, { unitCost: e.target.value })} placeholder="0.00" className={cell} />
                 </td>
                 <td className="pr-2 pb-2">
-                  <select aria-label="GST rate" value={r.taxRate} onChange={(e) => patch(r.key, { taxRate: e.target.value })} className={cell}>
+                  <select aria-label={`${taxName} rate`} value={r.taxRate} onChange={(e) => patch(r.key, { taxRate: e.target.value })} className={cell}>
                     {rateOptions.map((g) => (
                       <option key={g} value={g}>
                         {g}%
@@ -112,7 +119,11 @@ export function PoLinesEditor({
                 </td>
                 <td className="pr-2 pb-2 pt-2 text-right tabular-nums">
                   {formatMoney(calc.lines[i].amount + calc.lines[i].tax, currency)}
-                  {calc.lines[i].tax > 0 && <span className="block text-[11px] text-ink-mute">GST {formatMoney(calc.lines[i].tax, currency)}</span>}
+                  {calc.lines[i].tax > 0 && (
+                    <span className="block text-[11px] text-ink-mute">
+                      {taxName} {formatMoney(calc.lines[i].tax, currency)}
+                    </span>
+                  )}
                 </td>
                 <td className="pb-2 pt-1">
                   <button
@@ -137,7 +148,7 @@ export function PoLinesEditor({
           type="button"
           onClick={() => {
             setCounter((c) => c + 1);
-            setRows((rs) => [...rs, { key: counter, productId: "", quantity: "1", unitCost: "", taxRate: "18" }]);
+            setRows((rs) => [...rs, { key: counter, productId: "", quantity: "1", unitCost: "", taxRate: String(defaultRate) }]);
           }}
           className="inline-flex h-8 items-center gap-1.5 rounded-full border border-line px-3 text-xs font-medium transition hover:border-ink"
         >
@@ -149,7 +160,7 @@ export function PoLinesEditor({
             <dd className="tabular-nums">{formatMoney(calc.subtotal, currency)}</dd>
           </div>
           <div className="flex justify-between gap-6">
-            <dt className="text-ink-soft">GST</dt>
+            <dt className="text-ink-soft">{taxName}</dt>
             <dd className="tabular-nums">{formatMoney(calc.tax, currency)}</dd>
           </div>
           <div className="flex justify-between gap-6 border-t border-line pt-1 font-semibold">

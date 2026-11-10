@@ -5,49 +5,83 @@ import { and, asc, eq } from "drizzle-orm";
 import { ActionForm, Input, Select, SubmitButton } from "@/components/app/forms";
 import { Card, PageHeader, StatusBadge, Td, Th } from "@/components/app/ui";
 import { db, schema } from "@/db";
-import { invoiceDisplayStatus, isIntraState, splitGst, taxByRate } from "@/lib/finance-utils";
-import { daysBetween, formatDate, formatDateTime, formatMoney, todayYmd } from "@/lib/format";
+import { invoiceDisplayStatus, lineTaxOption, taxSummary } from "@/lib/finance-utils";
+import { addDaysYmd, daysBetween, formatDate, formatDateTime, formatMoney, todayYmd } from "@/lib/format";
 import { amountInWords, fromMinor } from "@/lib/money";
-import { requireWorkspace } from "@/lib/tenancy";
+import { hasFeature, packFor, requireWorkspace } from "@/lib/tenancy";
 import { deleteDraftInvoice, deletePaymentAction, recordPaymentAction, sendInvoiceAction, voidInvoiceAction } from "../../actions";
+import { issueCreditNoteAction, refundAction } from "../../credit-notes/actions";
+import { createScheduleAction } from "../../recurring/actions";
 import { ConfirmAction } from "../../_components/confirm-action";
+import { CreditNoteForm } from "../../_components/credit-note-form";
 import { PrintButton } from "../../_components/print-button";
+import { TaxBreakdown } from "../../_components/tax-breakdown";
 import { FINANCE_TABS } from "../../tabs";
 
 export const metadata: Metadata = { title: "Invoice" };
+
+const MONTHS = { monthly: 1, quarterly: 3, yearly: 12 } as const;
+const addMonths = (ymd: string, n: number) => {
+  const d = new Date(`${ymd}T00:00:00Z`);
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + n, d.getUTCDate())).toISOString().slice(0, 10);
+};
 
 export default async function InvoicePage({ params }: PageProps<"/app/finance/invoices/[id]">) {
   const ws = await requireWorkspace({ module: "finance" });
   const invoiceId = Number((await params).id);
   if (!Number.isInteger(invoiceId)) notFound();
   const orgId = ws.org.id;
+  const pack = packFor(ws);
   const [inv] = await db.select().from(schema.invoices).where(and(eq(schema.invoices.id, invoiceId), eq(schema.invoices.orgId, orgId))).limit(1);
   if (!inv) notFound();
 
-  const [lines, pays, [deal], [project]] = await Promise.all([
+  const [lines, pays, notes, noteLines, [schedule], [deal], [project]] = await Promise.all([
     db.select().from(schema.invoiceLines).where(eq(schema.invoiceLines.invoiceId, inv.id)).orderBy(asc(schema.invoiceLines.sortOrder)),
     db.select().from(schema.payments).where(and(eq(schema.payments.invoiceId, inv.id), eq(schema.payments.orgId, orgId))).orderBy(asc(schema.payments.date), asc(schema.payments.id)),
+    db.select().from(schema.creditNotes).where(and(eq(schema.creditNotes.invoiceId, inv.id), eq(schema.creditNotes.orgId, orgId))).orderBy(asc(schema.creditNotes.date), asc(schema.creditNotes.id)),
+    db
+      .select({ lineId: schema.creditNoteLines.invoiceLineId, qty: schema.creditNoteLines.quantity })
+      .from(schema.creditNoteLines)
+      .innerJoin(schema.creditNotes, eq(schema.creditNoteLines.creditNoteId, schema.creditNotes.id))
+      .where(and(eq(schema.creditNotes.invoiceId, inv.id), eq(schema.creditNotes.orgId, orgId))),
+    db.select().from(schema.recurringInvoices).where(and(eq(schema.recurringInvoices.templateInvoiceId, inv.id), eq(schema.recurringInvoices.orgId, orgId))).limit(1),
     inv.dealId ? db.select({ id: schema.deals.id, title: schema.deals.title }).from(schema.deals).where(and(eq(schema.deals.id, inv.dealId), eq(schema.deals.orgId, orgId))).limit(1) : Promise.resolve([]),
     inv.projectId ? db.select({ id: schema.projects.id, name: schema.projects.name }).from(schema.projects).where(and(eq(schema.projects.id, inv.projectId), eq(schema.projects.orgId, orgId))).limit(1) : Promise.resolve([]),
   ]);
 
   const cur = ws.org.currency;
   const today = todayYmd();
-  const balance = inv.total - inv.amountPaid;
-  const intra = isIntraState(inv.placeOfSupply, ws.org.state);
-  const gst = splitGst(inv.taxTotal, intra);
-  const rateRows = taxByRate(lines);
+  const balance = inv.total - inv.amountPaid - inv.amountCredited;
+  const creditBalance = -balance;
+  const tax = taxSummary(pack, lines, inv.placeOfSupply, ws.org.state);
   const display = invoiceDisplayStatus(inv, today);
   const open = inv.status === "sent" || inv.status === "partial";
+  const posted = open || inv.status === "paid";
   const late = open ? daysBetween(inv.dueDate, today) : 0;
+  const canRecur = hasFeature(ws, "recurringInvoices");
+
+  const creditedQty = new Map<number, number>();
+  for (const n of noteLines) if (n.lineId) creditedQty.set(n.lineId, (creditedQty.get(n.lineId) ?? 0) + n.qty);
+  const creditable = lines
+    .map((l) => ({
+      id: l.id,
+      description: l.description,
+      remaining: Math.round((l.quantity - (creditedQty.get(l.id) ?? 0)) * 1000) / 1000,
+      unitPrice: l.unitPrice,
+      taxRate: l.taxRate,
+      hasProduct: !!l.productId,
+    }))
+    .filter((l) => l.remaining > 0);
 
   const timeline = [
-    { label: "Created", at: formatDateTime(inv.createdAt), done: true },
-    { label: "Sent", at: inv.sentAt ? formatDateTime(inv.sentAt) : "", done: !!inv.sentAt },
-    ...pays.map((p) => ({ label: `Payment ${formatMoney(p.amount, cur)}`, at: formatDate(p.date), done: true })),
-    ...(inv.status === "paid" ? [{ label: "Paid in full", at: "", done: true }] : []),
-    ...(inv.status === "void" ? [{ label: "Voided", at: "", done: true }] : []),
+    { date: "", label: "Created", at: formatDateTime(inv.createdAt), done: true },
+    { date: "", label: "Sent", at: inv.sentAt ? formatDateTime(inv.sentAt) : "", done: !!inv.sentAt },
+    ...pays.map((p) => ({ date: p.date, label: p.amount < 0 ? `Refund ${formatMoney(-p.amount, cur)}` : `Payment ${formatMoney(p.amount, cur)}`, at: formatDate(p.date), done: true })),
+    ...notes.map((n) => ({ date: n.date, label: `Credit note ${n.number} · ${formatMoney(n.total, cur)}`, at: formatDate(n.date), done: true })),
   ];
+  const events = [...timeline.slice(0, 2), ...timeline.slice(2).sort((a, b) => a.date.localeCompare(b.date))];
+  if (inv.status === "paid") events.push({ date: "", label: balance < 0 ? "Settled · customer in credit" : "Paid in full", at: "", done: true });
+  if (inv.status === "void") events.push({ date: "", label: "Voided", at: "", done: true });
 
   return (
     <>
@@ -57,6 +91,7 @@ export default async function InvoicePage({ params }: PageProps<"/app/finance/in
             <span className="flex flex-wrap items-center gap-3">
               {inv.number}
               <StatusBadge value={display} />
+              {schedule && <StatusBadge value={schedule.active ? `repeats ${schedule.frequency}` : "recurring paused"} />}
             </span>
           }
           description={`${inv.customerName} · due ${formatDate(inv.dueDate)}${late > 0 ? ` · ${late} days overdue` : ""}`}
@@ -87,15 +122,19 @@ export default async function InvoicePage({ params }: PageProps<"/app/finance/in
         />
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[1fr_320px]">
+      <div className="grid gap-6 xl:grid-cols-[1fr_340px]">
         <article className="rounded-[20px] border border-line bg-card p-6 md:p-8 print:rounded-none print:border-0 print:p-0">
           <header className="flex flex-wrap items-start justify-between gap-6 border-b border-line pb-6">
             <div>
-              <p className="font-mono text-[11px] tracking-widest text-ink-mute uppercase">Tax invoice</p>
+              <p className="font-mono text-[11px] tracking-widest text-ink-mute uppercase">{pack.tax.invoiceTitle}</p>
               <h2 className="mt-1 font-display text-2xl font-semibold">{ws.org.name}</h2>
               {ws.org.address && <p className="mt-1 max-w-xs text-sm whitespace-pre-line text-ink-soft">{ws.org.address}</p>}
               <p className="mt-1 text-sm text-ink-soft">
-                {ws.org.gstin && <>GSTIN {ws.org.gstin}</>}
+                {ws.org.gstin && (
+                  <>
+                    {pack.tax.idLabel} {ws.org.gstin}
+                  </>
+                )}
                 {ws.org.gstin && ws.org.state && " · "}
                 {ws.org.state}
               </p>
@@ -126,7 +165,11 @@ export default async function InvoicePage({ params }: PageProps<"/app/finance/in
               <p className="mt-1 font-medium">{inv.customerName}</p>
               {inv.billingAddress && <p className="text-sm whitespace-pre-line text-ink-soft">{inv.billingAddress}</p>}
               {inv.customerEmail && <p className="text-sm text-ink-soft">{inv.customerEmail}</p>}
-              {inv.customerGstin && <p className="text-sm text-ink-soft">GSTIN {inv.customerGstin}</p>}
+              {inv.customerGstin && (
+                <p className="text-sm text-ink-soft">
+                  {pack.tax.idLabel} {inv.customerGstin}
+                </p>
+              )}
             </div>
             {(deal || project) && (
               <div className="print:hidden">
@@ -153,7 +196,7 @@ export default async function InvoicePage({ params }: PageProps<"/app/finance/in
 
           <div className="py-6">
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[560px] text-left text-sm">
+              <table className="w-full min-w-[620px] text-left text-sm">
                 <thead>
                   <tr>
                     <Th className="px-0">#</Th>
@@ -161,63 +204,32 @@ export default async function InvoicePage({ params }: PageProps<"/app/finance/in
                     <Th className="px-2 text-right">Qty</Th>
                     <Th className="px-2 text-right">Rate</Th>
                     <Th className="px-2 text-right">Taxable value</Th>
-                    <Th className="px-2 text-right">GST %</Th>
+                    <Th className="px-2 text-right">{pack.tax.name}</Th>
+                    <Th className="px-2 text-right">Tax amount</Th>
                   </tr>
                 </thead>
                 <tbody>
-                  {lines.map((l, i) => (
-                    <tr key={l.id}>
-                      <Td className="px-0 text-ink-mute">{i + 1}</Td>
-                      <Td className="px-2">{l.description}</Td>
-                      <Td className="px-2 text-right tabular-nums">{l.quantity}</Td>
-                      <Td className="px-2 text-right tabular-nums">{formatMoney(l.unitPrice, cur)}</Td>
-                      <Td className="px-2 text-right tabular-nums">{formatMoney(l.amount, cur)}</Td>
-                      <Td className="px-2 text-right tabular-nums">{l.taxRate}%</Td>
-                    </tr>
-                  ))}
+                  {lines.map((l, i) => {
+                    const opt = lineTaxOption(pack, l.taxCode, l.taxRate);
+                    return (
+                      <tr key={l.id}>
+                        <Td className="px-0 text-ink-mute">{i + 1}</Td>
+                        <Td className="px-2">{l.description}</Td>
+                        <Td className="px-2 text-right tabular-nums">{l.quantity}</Td>
+                        <Td className="px-2 text-right tabular-nums">{formatMoney(l.unitPrice, cur)}</Td>
+                        <Td className="px-2 text-right tabular-nums">{formatMoney(l.amount, cur)}</Td>
+                        <Td className="px-2 text-right whitespace-nowrap tabular-nums">{opt.kind === "exempt" ? "Exempt" : `${l.taxRate}%`}</Td>
+                        <Td className="px-2 text-right tabular-nums">{formatMoney(l.taxAmount, cur)}</Td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
 
             <div className="mt-6 grid gap-6 sm:grid-cols-[1fr_280px]">
               <div className="text-sm">
-                {rateRows.length > 0 && (
-                  <table className="w-full max-w-sm text-left text-xs">
-                    <thead>
-                      <tr className="font-mono tracking-widest text-ink-mute uppercase">
-                        <th className="pb-1 font-normal">GST %</th>
-                        <th className="pb-1 text-right font-normal">Taxable</th>
-                        {intra ? (
-                          <>
-                            <th className="pb-1 text-right font-normal">CGST</th>
-                            <th className="pb-1 text-right font-normal">SGST</th>
-                          </>
-                        ) : (
-                          <th className="pb-1 text-right font-normal">IGST</th>
-                        )}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {rateRows.map((r) => {
-                        const s = splitGst(r.tax, intra);
-                        return (
-                          <tr key={r.rate}>
-                            <td className="py-0.5">{r.rate}%</td>
-                            <td className="py-0.5 text-right tabular-nums">{formatMoney(r.taxable, cur)}</td>
-                            {intra ? (
-                              <>
-                                <td className="py-0.5 text-right tabular-nums">{formatMoney(s.cgst, cur)}</td>
-                                <td className="py-0.5 text-right tabular-nums">{formatMoney(s.sgst, cur)}</td>
-                              </>
-                            ) : (
-                              <td className="py-0.5 text-right tabular-nums">{formatMoney(s.igst, cur)}</td>
-                            )}
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                )}
+                <TaxBreakdown rows={tax.rows} taxName={pack.tax.name} currency={cur} />
                 <p className="mt-4 text-ink-soft">
                   <span className="font-medium text-ink">Amount in words: </span>
                   {amountInWords(inv.total, cur)}
@@ -228,23 +240,12 @@ export default async function InvoicePage({ params }: PageProps<"/app/finance/in
                   <dt className="text-ink-soft">Subtotal</dt>
                   <dd className="tabular-nums">{formatMoney(inv.subtotal, cur)}</dd>
                 </div>
-                {intra ? (
-                  <>
-                    <div className="flex justify-between">
-                      <dt className="text-ink-soft">CGST</dt>
-                      <dd className="tabular-nums">{formatMoney(gst.cgst, cur)}</dd>
-                    </div>
-                    <div className="flex justify-between">
-                      <dt className="text-ink-soft">SGST</dt>
-                      <dd className="tabular-nums">{formatMoney(gst.sgst, cur)}</dd>
-                    </div>
-                  </>
-                ) : (
-                  <div className="flex justify-between">
-                    <dt className="text-ink-soft">IGST</dt>
-                    <dd className="tabular-nums">{formatMoney(gst.igst, cur)}</dd>
+                {tax.totals.map((t) => (
+                  <div key={t.label} className="flex justify-between">
+                    <dt className="text-ink-soft">{t.label}</dt>
+                    <dd className="tabular-nums">{formatMoney(t.amount, cur)}</dd>
                   </div>
-                )}
+                ))}
                 <div className="flex justify-between border-t border-line pt-1.5 font-semibold">
                   <dt>Total</dt>
                   <dd className="tabular-nums">{formatMoney(inv.total, cur)}</dd>
@@ -253,9 +254,15 @@ export default async function InvoicePage({ params }: PageProps<"/app/finance/in
                   <dt className="text-ink-soft">Paid</dt>
                   <dd className="tabular-nums">{formatMoney(inv.amountPaid, cur)}</dd>
                 </div>
+                {inv.amountCredited > 0 && (
+                  <div className="flex justify-between">
+                    <dt className="text-ink-soft">Credited</dt>
+                    <dd className="tabular-nums">{formatMoney(inv.amountCredited, cur)}</dd>
+                  </div>
+                )}
                 <div className="flex justify-between font-display text-lg font-bold">
-                  <dt>Balance due</dt>
-                  <dd className="tabular-nums">{inv.status === "void" ? "—" : formatMoney(balance, cur)}</dd>
+                  <dt>{balance < 0 ? "Customer credit" : "Balance due"}</dt>
+                  <dd className="tabular-nums">{inv.status === "void" ? "—" : formatMoney(Math.abs(balance), cur)}</dd>
                 </div>
               </dl>
             </div>
@@ -270,7 +277,7 @@ export default async function InvoicePage({ params }: PageProps<"/app/finance/in
         </article>
 
         <aside className="space-y-6 print:hidden">
-          {open && (
+          {open && balance > 0 && (
             <Card title="Record payment">
               <ActionForm action={recordPaymentAction} className="space-y-3">
                 <input type="hidden" name="invoiceId" value={inv.id} />
@@ -283,6 +290,45 @@ export default async function InvoicePage({ params }: PageProps<"/app/finance/in
             </Card>
           )}
 
+          {posted && creditBalance > 0 && (
+            <Card title="Refund customer">
+              <ActionForm action={refundAction} className="space-y-3">
+                <input type="hidden" name="invoiceId" value={inv.id} />
+                <p className="text-sm text-ink-soft">The customer has {formatMoney(creditBalance, cur)} in credit on this invoice. A refund is paid from the bank account.</p>
+                <Input label="Date" name="date" type="date" defaultValue={today} required />
+                <Input label={`Amount (max ${formatMoney(creditBalance, cur)})`} name="amount" inputMode="decimal" defaultValue={fromMinor(creditBalance)} required />
+                <SubmitButton className="w-full">Record refund</SubmitButton>
+              </ActionForm>
+            </Card>
+          )}
+
+          {posted && creditable.length > 0 && (
+            <Card title="Issue credit note">
+              <CreditNoteForm key={inv.amountCredited} action={issueCreditNoteAction} invoiceId={inv.id} lines={creditable} currency={cur} today={today} taxName={pack.tax.name} />
+            </Card>
+          )}
+
+          {notes.length > 0 && (
+            <Card title="Credit notes" actions={<Link href="/app/finance/credit-notes" className="text-sm text-ink-soft hover:text-ink">All</Link>}>
+              <ul className="space-y-3">
+                {notes.map((n) => (
+                  <li key={n.id} className="flex items-start justify-between gap-3 text-sm">
+                    <div>
+                      <Link href={`/app/finance/credit-notes/${n.id}`} className="font-medium hover:underline">
+                        {n.number}
+                      </Link>
+                      <p className="text-xs text-ink-mute">
+                        {formatDate(n.date)} · {n.reason}
+                        {n.restock ? " · restocked" : ""}
+                      </p>
+                    </div>
+                    <span className="font-medium tabular-nums">{formatMoney(n.total, cur)}</span>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
+
           <Card title="Payments">
             {pays.length === 0 ? (
               <p className="text-sm text-ink-soft">No payments yet.</p>
@@ -291,24 +337,62 @@ export default async function InvoicePage({ params }: PageProps<"/app/finance/in
                 {pays.map((p) => (
                   <li key={p.id} className="flex items-start justify-between gap-3 text-sm">
                     <div>
-                      <p className="font-medium tabular-nums">{formatMoney(p.amount, cur)}</p>
+                      <p className="font-medium tabular-nums">{p.amount < 0 ? `Refund ${formatMoney(-p.amount, cur)}` : formatMoney(p.amount, cur)}</p>
                       <p className="text-xs text-ink-mute capitalize">
                         {formatDate(p.date)} · {p.method.replace("_", " ")}
                         {p.reference ? ` · ${p.reference}` : ""}
                       </p>
                     </div>
-                    <ConfirmAction action={deletePaymentAction} fields={{ paymentId: p.id }} confirm="Delete this payment? The ledger entry will be reversed." className="h-7 px-3 text-xs">
-                      Delete
-                    </ConfirmAction>
+                    {p.amount > 0 && (
+                      <ConfirmAction action={deletePaymentAction} fields={{ paymentId: p.id }} confirm="Delete this payment? The ledger entry will be reversed." className="h-7 px-3 text-xs">
+                        Delete
+                      </ConfirmAction>
+                    )}
                   </li>
                 ))}
               </ul>
             )}
           </Card>
 
+          {schedule ? (
+            <Card title="Recurring" actions={<Link href="/app/finance/recurring" className="text-sm text-ink-soft hover:text-ink">Manage</Link>}>
+              <p className="text-sm">
+                Repeats <span className="font-medium">{schedule.frequency}</span> · next {formatDate(schedule.nextDate)}
+                {schedule.endDate ? ` · until ${formatDate(schedule.endDate)}` : ""}
+                {schedule.autoSend ? " · sent automatically" : " · created as drafts"}
+                {!schedule.active ? " · paused" : ""}
+              </p>
+            </Card>
+          ) : (
+            inv.status !== "void" &&
+            (canRecur ? (
+              <Card title="Make recurring">
+                <ActionForm action={createScheduleAction} className="space-y-3">
+                  <input type="hidden" name="templateInvoiceId" value={inv.id} />
+                  <Select label="Repeat" name="frequency" options={Object.keys(MONTHS)} defaultValue="monthly" />
+                  <Input label="Next invoice date" name="nextDate" type="date" defaultValue={addMonths(inv.issueDate, 1) < today ? addDaysYmd(today, 1) : addMonths(inv.issueDate, 1)} required />
+                  <Input label="End date (optional)" name="endDate" type="date" />
+                  <label className="flex items-center gap-2 text-sm">
+                    <input type="checkbox" name="autoSend" className="size-4 accent-ink" /> Send automatically (posts to the ledger)
+                  </label>
+                  <SubmitButton className="w-full" variant="outline">
+                    Create schedule
+                  </SubmitButton>
+                </ActionForm>
+              </Card>
+            ) : (
+              <p className="text-xs text-ink-mute">
+                Recurring invoices are on the Growth plan.{" "}
+                <Link href="/app/billing?upgrade=recurringInvoices" className="underline">
+                  Upgrade
+                </Link>
+              </p>
+            ))
+          )}
+
           <Card title="Timeline">
             <ol className="space-y-3 border-l border-line pl-4">
-              {timeline.map((t, i) => (
+              {events.map((t, i) => (
                 <li key={i} className="relative text-sm">
                   <span className="absolute -left-[21px] top-1.5 size-2.5 rounded-full bg-ink" />
                   <p className="font-medium">{t.label}</p>

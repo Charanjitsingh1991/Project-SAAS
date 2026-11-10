@@ -18,9 +18,9 @@ export async function invoiceFormOptions(orgId: number): Promise<{ customers: Cu
     customers: companies.map((c) => ({
       id: c.id,
       name: c.name,
-      gstin: c.gstin ?? "",
+      taxId: c.gstin ?? "",
       address: [c.billingAddress, c.city].filter(Boolean).join(", "),
-      state: c.state ?? "",
+      region: c.state ?? "",
       email: email.get(c.id) ?? "",
     })),
     products: products

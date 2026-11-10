@@ -7,10 +7,11 @@ import { db, schema } from "@/db";
 import { formatDate, formatMoney } from "@/lib/format";
 import { COVER_WINDOW_DAYS, daysOfCover, fmtQty, isLowStock, marginPct, withRunningBalance } from "@/lib/inventory";
 import { getVendors, getWarehouses, stockStats } from "@/lib/inventory-data";
-import { requireWorkspace } from "@/lib/tenancy";
+import { packFor, requireWorkspace } from "@/lib/tenancy";
 import { MovementTable } from "../../_components/movement-table";
 import { Qty } from "../../_components/parts";
 import { ProductForm } from "../../_components/product-form";
+import { inventoryTax } from "../../_components/tax";
 import { StockActionForms } from "../../_components/stock-forms";
 import { INVENTORY_TABS } from "../../tabs";
 
@@ -22,6 +23,7 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
   if (!Number.isInteger(id)) notFound();
   const orgId = ws.org.id;
   const cur = ws.org.currency;
+  const tax = inventoryTax(packFor(ws));
 
   const [product] = await db.select().from(schema.products).where(and(eq(schema.products.id, id), eq(schema.products.orgId, orgId))).limit(1);
   if (!product) notFound();
@@ -102,7 +104,7 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
           hint={outflow > 0 ? `${fmtQty(outflow)} out in last ${COVER_WINDOW_DAYS} days` : "No outflow in last 30 days"}
           tone={cover !== null && cover < 14 ? "peach" : "card"}
         />
-        <Stat label="Margin" value={margin === null ? "—" : `${margin.toFixed(1)}%`} hint={`Price ${formatMoney(product.sellingPrice, cur)} · GST ${product.taxRate}%`} tone="sky" />
+        <Stat label="Margin" value={margin === null ? "—" : `${margin.toFixed(1)}%`} hint={`Price ${formatMoney(product.sellingPrice, cur)} · ${tax.name} ${product.taxRate}%`} tone="sky" />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
@@ -127,7 +129,7 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
           )}
         </Card>
         <Card title="Details" className="lg:col-span-2">
-          <ProductForm vendors={vendors} product={product} costLocked={hasReceipt} />
+          <ProductForm vendors={vendors} product={product} costLocked={hasReceipt} tax={tax} />
         </Card>
       </div>
 
