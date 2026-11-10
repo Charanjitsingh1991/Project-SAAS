@@ -3,6 +3,7 @@ import { and, asc, eq, isNotNull } from "drizzle-orm";
 import { db, schema } from "@/db";
 import type { PRIORITIES, TICKET_CHANNELS } from "@/db/schema";
 import { logActivity, type Ctx } from "@/lib/activity";
+import { packOf, type CountryCode } from "@/lib/countries";
 import { createTicket, getMembers } from "@/lib/helpdesk-data";
 
 type Priority = (typeof PRIORITIES)[number];
@@ -21,7 +22,7 @@ const CANNED = [
   { title: "Closing the loop", body: "We haven't heard back, so we're marking this as resolved. Reply anytime to reopen it and we'll pick it right back up." },
 ];
 
-const ARTICLES: { title: string; category: string; published: boolean; body: string }[] = [
+const ARTICLE_SEEDS: { title: string; category: string; published: boolean; body: string }[] = [
   { title: "How to reset your password", category: "Account", published: true, body: "Forgot your password? No problem.\n\n1. Go to the login page and choose “Forgot password”.\n2. Enter the email you signed up with.\n3. Open the email we send and follow the link.\n\nThe link expires after 30 minutes. If you don't see the email, check your spam folder." },
   { title: "Update your profile and email address", category: "Account", published: true, body: "Open your account settings to change your name, phone number or email address.\n\nChanging your email signs you out everywhere, so you'll need to log in again with the new address." },
   { title: "Understanding your invoice", category: "Billing", published: true, body: "Each invoice lists the items you purchased, the tax applied per line and the total due.\n\nTax is calculated per line and rounded once, so totals always add up exactly. If something looks wrong, contact us with the invoice number." },
@@ -52,7 +53,7 @@ type Seed = {
   thread?: Msg[];
 };
 
-const TICKETS: Seed[] = [
+const TICKET_SEEDS: Seed[] = [
   { agoH: 500, subject: "Invoice shows wrong GST amount", desc: "The GST on last month's invoice looks higher than expected. Can you check?", contact: 0, channel: "email", category: "Billing", priority: "low", status: "closed", assignee: 0, firstReplyMin: 180, resolveH: 20, csat: [5, "Quick and clear explanation."], thread: [{ kind: "n", text: "Checked: tax was applied on the freight line as well. Looks correct per HSN.", afterMin: 240 }, { kind: "a", text: "The rate applies to the freight line too, which is why the total looks higher. I've attached the breakdown.", afterMin: 300 }, { kind: "r", text: "Understood, thank you!", afterMin: 600 }] },
   { agoH: 450, subject: "Can't log in after changing phone", desc: "I changed my phone and now I can't sign in to my account.", name: "Neha Kapoor", email: "neha.kapoor@example.com", channel: "portal", category: "Account", priority: "medium", status: "resolved", assignee: 1, firstReplyMin: 95, resolveH: 30, csat: [4, "Works now."], thread: [{ kind: "a", text: "Could you confirm the email on the account? I'll send a fresh sign-in link.", afterMin: 95 }, { kind: "r", text: "It's neha.kapoor@example.com", afterMin: 200 }, { kind: "a", text: "Done, link sent. It's valid for 30 minutes.", afterMin: 260 }] },
   { agoH: 400, subject: "Order stuck at 'dispatched' for 4 days", desc: "My order has shown dispatched for four days with no movement.", contact: 1, channel: "phone", category: "Orders", priority: "high", status: "closed", assignee: 0, firstReplyMin: 40, resolveH: 10, csat: [5, "Called the courier right away."], thread: [{ kind: "n", text: "Courier hub delay. Raised escalation with the carrier.", afterMin: 90 }, { kind: "a", text: "The courier confirmed a hub delay. A replacement dispatch is on its way and will arrive tomorrow.", afterMin: 300 }] },
@@ -70,9 +71,25 @@ const TICKETS: Seed[] = [
   { agoH: 20, subject: "Where can I find my GST invoice?", desc: "I need the GST invoice for my records. Where do I download it?", name: "Deepak Verma", email: "deepak.verma@example.com", channel: "web", category: "Billing", priority: "low", status: "open", assignee: 1, firstReplyMin: 300, thread: [{ kind: "a", text: "You can download it from your order page under “Invoice”. Let us know if you can't see it.", afterMin: 300 }] },
 ];
 
+/** Swap India-specific wording (GST, HSN, UPI) for the workspace's country. */
+const LOCAL_TEXT: Record<CountryCode, [RegExp, string][]> = {
+  IN: [],
+  AE: [
+    [/GST invoice/g, "tax invoice"],
+    [/GST/g, "VAT"],
+    [/per HSN/g, "per the VAT rules"],
+    [/UPI/g, "Apple Pay"],
+  ],
+};
+
 export async function seedHelpdesk(ctx: Ctx): Promise<void> {
   const orgId = ctx.orgId;
   const nowMs = Date.now();
+  const [org] = await db.select({ country: schema.organizations.country }).from(schema.organizations).where(eq(schema.organizations.id, orgId)).limit(1);
+  const rules = LOCAL_TEXT[packOf(org ?? {}).code];
+  const local = (text: string) => rules.reduce((t, [re, to]) => t.replace(re, to), text);
+  const ARTICLES = ARTICLE_SEEDS.map((a) => ({ ...a, body: local(a.body) }));
+  const TICKETS = TICKET_SEEDS.map((s) => ({ ...s, subject: local(s.subject), desc: local(s.desc), thread: s.thread?.map((m) => ({ ...m, text: local(m.text) })) }));
 
   await db.insert(schema.cannedResponses).values(CANNED.map((c) => ({ ...c, orgId, createdAt: new Date(nowMs - 25 * 24 * H) })));
 
