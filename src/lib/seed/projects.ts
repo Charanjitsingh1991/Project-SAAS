@@ -2,6 +2,7 @@ import "server-only";
 import { and, asc, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { logActivity, type Ctx } from "@/lib/activity";
+import { packOf, type CountryCode } from "@/lib/countries";
 import { addDaysYmd, todayYmd } from "@/lib/format";
 import { invoiceProjectTime } from "@/lib/posting";
 import { weekStartOf } from "@/lib/projects";
@@ -26,6 +27,9 @@ type ProjectSpec = {
   milestones: [string, number, boolean][];
   tasks: TaskSpec[];
 };
+
+/** Budgets are authored in lakh and rates in rupees; UAE uses AED 15,000 per budget unit and AED 350/h for the ₹2,500/h rate. */
+const MONEY: Record<CountryCode, { budgetUnit: number; rateFactor: number }> = { IN: { budgetUnit: 100_000, rateFactor: 1 }, AE: { budgetUnit: 15_000, rateFactor: 0.14 } };
 
 const hash = (a: number, b: number) => {
   let h = Math.imul(a + 1, 2654435761) ^ Math.imul(b + 7, 40503);
@@ -153,6 +157,9 @@ export async function seedProjects(ctx: Ctx): Promise<void> {
   const { orgId } = ctx;
   const today = todayYmd();
   const d = (n: number) => addDaysYmd(today, n);
+  const [org] = await db.select({ country: schema.organizations.country }).from(schema.organizations).where(eq(schema.organizations.id, orgId)).limit(1);
+  const money = MONEY[packOf(org ?? {}).code];
+  const rateMinor = (s: ProjectSpec) => Math.round((s.rate ?? 0) * money.rateFactor * 100);
 
   const emps = await db
     .select({ id: schema.employees.id, annualCtc: schema.employees.annualCtc })
@@ -234,8 +241,8 @@ export async function seedProjects(ctx: Ctx): Promise<void> {
         ownerId: ctx.userId,
         color: s.color,
         billingType: s.billingType,
-        budget: Math.round((s.budgetL ?? 0) * 100_000 * 100),
-        hourlyRate: Math.round((s.rate ?? 0) * 100),
+        budget: Math.round((s.budgetL ?? 0) * money.budgetUnit * 100),
+        hourlyRate: rateMinor(s),
         startDate: d(s.start),
         dueDate: d(s.due),
         status: s.status,
@@ -247,7 +254,7 @@ export async function seedProjects(ctx: Ctx): Promise<void> {
       .returning({ id: schema.milestones.id });
     const tasks = await addTasks(p.id, s.tasks, ms.map((m) => m.id));
     await logActivity(ctx, { module: "projects", entityType: "project", entityId: p.id, action: "created", summary: `Created project ${code} ${s.name}` });
-    if (s.status !== "done") projectIds.push({ id: p.id, spec: { billingType: s.billingType, rate: Math.round((s.rate ?? 0) * 100) }, tasks });
+    if (s.status !== "done") projectIds.push({ id: p.id, spec: { billingType: s.billingType, rate: rateMinor(s) }, tasks });
     else finished = { id: p.id, tasks };
   }
 
