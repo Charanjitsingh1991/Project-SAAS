@@ -6,8 +6,8 @@ import { Input, Select } from "@/components/app/forms";
 import { Badge, Card, EmptyState, PageHeader, Stat, StatusBadge, Table, Td, Th } from "@/components/app/ui";
 import { db, schema } from "@/db";
 import { addDaysYmd, formatDate, initials, todayYmd } from "@/lib/format";
-import { attritionPct } from "@/lib/hrm";
-import { requireWorkspace } from "@/lib/tenancy";
+import { attritionPct, expiryAlerts, expiryText } from "@/lib/hrm";
+import { packFor, requireWorkspace } from "@/lib/tenancy";
 import { hrmTabs } from "./tabs";
 
 export const metadata: Metadata = { title: "People" };
@@ -36,6 +36,8 @@ export default async function HrmDirectoryPage({ searchParams }: { searchParams:
   const headStart = emps.filter((e) => e.joinDate <= yearAgo && (e.status !== "exited" || !e.exitDate || e.exitDate > yearAgo)).length;
   const headNow = emps.filter((e) => e.status !== "exited").length;
   const attrition = attritionPct(exits12, headStart, headNow);
+  const fields = packFor(ws).hr.employeeFields;
+  const alertsByEmp = new Map(emps.filter((e) => e.status !== "exited").map((e) => [e.id, expiryAlerts(fields, e, today)] as const).filter(([, a]) => a.length));
 
   const q = sp.q?.trim().toLowerCase() ?? "";
   const rows = emps.filter(
@@ -52,7 +54,7 @@ export default async function HrmDirectoryPage({ searchParams }: { searchParams:
       <PageHeader
         title="People"
         description="Employee directory, lifecycle, leave and attendance in one place."
-        tabs={hrmTabs("directory")}
+        tabs={hrmTabs(ws, "directory")}
         actions={
           <>
             {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- file download, not a page */}
@@ -72,6 +74,27 @@ export default async function HrmDirectoryPage({ searchParams }: { searchParams:
         <Stat label="On notice" value={onNotice} tone="butter" />
         <Stat label="Attrition (12 mo)" value={`${attrition}%`} hint={`${exits12} exit${exits12 === 1 ? "" : "s"}`} tone="peach" />
       </div>
+
+      {alertsByEmp.size > 0 && (
+        <Card title={`Document renewals · ${alertsByEmp.size} employee${alertsByEmp.size === 1 ? "" : "s"}`} className="mb-6">
+          <ul className="divide-y divide-line/70 text-sm">
+            {[...alertsByEmp].map(([id, alerts]) => (
+              <li key={id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+                <Link href={`/app/hrm/${id}?tab=compensation`} className="font-medium hover:underline">
+                  {empName.get(id)}
+                </Link>
+                <span className="flex flex-wrap gap-1.5">
+                  {alerts.map((a) => (
+                    <Badge key={a.key} tone={a.expired || a.daysLeft <= 14 ? "rose" : "butter"}>
+                      {expiryText(a)}
+                    </Badge>
+                  ))}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
 
       <form className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-[2fr_1fr_1fr_1fr_auto]" method="get">
         <Input label="Search" name="q" defaultValue={sp.q ?? ""} placeholder="Name, code, email, designation" />
@@ -130,7 +153,14 @@ export default async function HrmDirectoryPage({ searchParams }: { searchParams:
                   </Td>
                   <Td className="whitespace-nowrap">{formatDate(e.joinDate)}</Td>
                   <Td>
-                    <StatusBadge value={e.status} />
+                    <span className="flex flex-wrap items-center gap-1.5">
+                      <StatusBadge value={e.status} />
+                      {alertsByEmp.has(e.id) && (
+                        <span title={alertsByEmp.get(e.id)!.map(expiryText).join(", ")}>
+                          <Badge tone="rose">docs expiring</Badge>
+                        </span>
+                      )}
+                    </span>
                   </Td>
                 </tr>
               ))}
