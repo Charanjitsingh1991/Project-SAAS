@@ -1,5 +1,6 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { db, schema } from "@/db";
+import { packOf } from "@/lib/countries";
 import { canUseModule, getWorkspace, type ActiveWorkspace } from "@/lib/tenancy";
 import type { ModuleKey } from "@/lib/roles";
 
@@ -11,26 +12,41 @@ const money = (minor: number | null | undefined) => ((minor ?? 0) / 100).toFixed
 const EXPORTS: Record<string, Exporter> = {
   employees: {
     module: "hrm",
+    // Country-specific columns; bank account numbers / IBANs are never exported.
     load: async (orgId) => {
+      const [org] = await db.select({ country: schema.organizations.country }).from(schema.organizations).where(eq(schema.organizations.id, orgId)).limit(1);
       const rows = await db
         .select({ e: schema.employees, dept: schema.departments.name })
         .from(schema.employees)
         .leftJoin(schema.departments, eq(schema.employees.departmentId, schema.departments.id))
         .where(eq(schema.employees.orgId, orgId))
         .orderBy(schema.employees.code);
+      const ae = org?.country === "AE";
       return rows.map(({ e, dept }) => ({
         code: e.code, name: e.name, email: e.email, phone: e.phone, department: dept, designation: e.designation,
         employment_type: e.employmentType, status: e.status, join_date: e.joinDate, exit_date: e.exitDate,
-        annual_ctc: money(e.annualCtc), work_location: e.workLocation,
+        [ae ? "annual_package" : "annual_ctc"]: money(e.annualCtc), work_location: e.workLocation,
+        ...(ae
+          ? {
+              nationality: e.nationality, emirates_id_expiry: e.emiratesIdExpiry, passport_expiry: e.passportExpiry,
+              visa_expiry: e.visaExpiry, labour_card: e.labourCardNumber, wps_person_id: e.wpsPersonId, bank_name: e.bankName,
+            }
+          : { pan: e.pan, uan: e.uan, ifsc: e.ifsc, bank_name: e.bankName, pf_enrolled: e.pfEnrolled, metro: e.metro, passport_expiry: e.passportExpiry }),
       }));
     },
   },
   companies: {
     module: "crm",
-    load: async (orgId) =>
-      (await db.select().from(schema.companies).where(eq(schema.companies.orgId, orgId))).map((c) => ({
-        name: c.name, industry: c.industry, website: c.website, phone: c.phone, gstin: c.gstin, city: c.city, state: c.state, country: c.country,
-      })),
+    load: async (orgId) => {
+      // Column names follow the workspace country (gstin/state in India, trn/emirate in the UAE).
+      const [org] = await db.select({ country: schema.organizations.country }).from(schema.organizations).where(eq(schema.organizations.id, orgId)).limit(1);
+      const pack = packOf(org ?? {});
+      const idKey = pack.tax.idLabel.toLowerCase();
+      const regionKey = pack.regionLabel.toLowerCase();
+      return (await db.select().from(schema.companies).where(eq(schema.companies.orgId, orgId))).map((c) => ({
+        name: c.name, industry: c.industry, website: c.website, phone: c.phone, [idKey]: c.gstin, city: c.city, [regionKey]: c.state, country: c.country,
+      }));
+    },
   },
   contacts: {
     module: "crm",

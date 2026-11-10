@@ -1,6 +1,7 @@
 import { ActionForm, Input, Select, SubmitButton, Textarea } from "@/components/app/forms";
 import { PoLinesEditor, type PoEditorLine, type PoEditorProduct } from "@/components/app/po-lines-editor";
 import type { FormState } from "@/lib/definitions";
+import type { InventoryTax } from "./tax";
 
 type Opt = { id: number; name: string };
 
@@ -13,7 +14,9 @@ export function PoForm({
   currency,
   initial,
   submitLabel,
+  tax,
 }: {
+  tax: InventoryTax;
   action: (state: FormState, formData: FormData) => Promise<FormState>;
   id?: number;
   vendors: Opt[];
@@ -32,7 +35,7 @@ export function PoForm({
         <Input label="Order date" name="orderDate" type="date" defaultValue={initial.orderDate} />
         <Input label="Expected date" name="expectedDate" type="date" defaultValue={initial.expectedDate ?? ""} />
       </div>
-      <PoLinesEditor products={products} initial={initial.lines} currency={currency} />
+      <PoLinesEditor products={products} initial={initial.lines} currency={currency} rates={tax.rates} taxName={tax.name} defaultRate={tax.defaultRate} />
       <Textarea label="Notes" name="notes" defaultValue={initial.notes ?? ""} />
       <SubmitButton>{submitLabel}</SubmitButton>
     </ActionForm>

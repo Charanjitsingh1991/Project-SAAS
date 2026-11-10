@@ -5,8 +5,9 @@ import { Card, EmptyState, PageHeader, Table, Td, Th } from "@/components/app/ui
 import { db, schema } from "@/db";
 import { formatMoney } from "@/lib/format";
 import { getVendors } from "@/lib/inventory-data";
-import { requireWorkspace } from "@/lib/tenancy";
+import { packFor, requireWorkspace } from "@/lib/tenancy";
 import { ErrorBanner } from "../_components/parts";
+import { inventoryTax } from "../_components/tax";
 import { VendorForm } from "../_components/vendor-form";
 import { INVENTORY_TABS } from "../tabs";
 
@@ -16,6 +17,7 @@ export default async function VendorsPage({ searchParams }: { searchParams: Prom
   const ws = await requireWorkspace({ module: "inventory" });
   const { error } = await searchParams;
   const orgId = ws.org.id;
+  const tax = inventoryTax(packFor(ws));
   const [vendors, pos, unpaid] = await Promise.all([
     getVendors(orgId),
     db.select({ vendorId: schema.purchaseOrders.vendorId, n: sql<number>`count(*)` }).from(schema.purchaseOrders).where(eq(schema.purchaseOrders.orgId, orgId)).groupBy(schema.purchaseOrders.vendorId),
@@ -42,7 +44,7 @@ export default async function VendorsPage({ searchParams }: { searchParams: Prom
               <tr>
                 <Th>Vendor</Th>
                 <Th>Contact</Th>
-                <Th>GSTIN</Th>
+                <Th>{tax.idLabel}</Th>
                 <Th className="text-right">POs</Th>
                 <Th className="text-right">Unpaid</Th>
               </tr>
@@ -67,7 +69,7 @@ export default async function VendorsPage({ searchParams }: { searchParams: Prom
       </Card>
 
       <Card title="New vendor" className="mt-6">
-        <VendorForm />
+        <VendorForm tax={tax} />
       </Card>
     </>
   );

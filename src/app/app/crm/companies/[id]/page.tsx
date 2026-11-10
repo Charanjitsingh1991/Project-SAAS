@@ -7,10 +7,11 @@ import { ActionButton } from "@/components/app/forms";
 import { Card, EmptyState, PageHeader, Stat, StatusBadge, Table, Td, Th } from "@/components/app/ui";
 import { db, schema } from "@/db";
 import { formatDate, formatMoney, todayYmd } from "@/lib/format";
-import { requireWorkspace } from "@/lib/tenancy";
+import { packFor, requireWorkspace } from "@/lib/tenancy";
 import { deleteCompany } from "../../actions";
 import { getMembers } from "../../data";
-import { ActivityForm, ActivityTimeline, CompanyForm } from "../../parts";
+import { ActivityForm, ActivityTimeline, CompanyForm, taxFields } from "../../parts";
+import { QuoteList } from "../../_components/quote-status";
 import { CRM_TABS } from "../../tabs";
 
 export const metadata: Metadata = { title: "Company" };
@@ -23,14 +24,16 @@ export default async function CompanyPage({ params }: { params: Promise<{ id: st
   const [company] = await db.select().from(schema.companies).where(and(eq(schema.companies.id, id), eq(schema.companies.orgId, orgId))).limit(1);
   if (!company) notFound();
 
-  const [members, contacts, deals, activities, invoices, tickets] = await Promise.all([
+  const [members, contacts, deals, activities, invoices, tickets, quotes] = await Promise.all([
     getMembers(orgId),
     db.select().from(schema.contacts).where(and(eq(schema.contacts.companyId, id), eq(schema.contacts.orgId, orgId))).orderBy(asc(schema.contacts.name)),
     db.select().from(schema.deals).where(and(eq(schema.deals.companyId, id), eq(schema.deals.orgId, orgId))).orderBy(desc(schema.deals.createdAt)),
     db.select().from(schema.crmActivities).where(and(eq(schema.crmActivities.companyId, id), eq(schema.crmActivities.orgId, orgId))).orderBy(desc(schema.crmActivities.createdAt)),
     db.select().from(schema.invoices).where(and(eq(schema.invoices.companyId, id), eq(schema.invoices.orgId, orgId))).orderBy(desc(schema.invoices.issueDate)),
     db.select().from(schema.tickets).where(and(eq(schema.tickets.companyId, id), eq(schema.tickets.orgId, orgId))).orderBy(desc(schema.tickets.createdAt)),
+    db.select().from(schema.quotes).where(and(eq(schema.quotes.companyId, id), eq(schema.quotes.orgId, orgId))).orderBy(desc(schema.quotes.createdAt), desc(schema.quotes.id)),
   ]);
+  const pack = packFor(ws);
 
   const cur = ws.org.currency;
   const live = invoices.filter((i) => i.status !== "void");
@@ -59,7 +62,7 @@ export default async function CompanyPage({ params }: { params: Promise<{ id: st
 
       <div className="grid gap-6 xl:grid-cols-2">
         <Card title="Details" className="xl:col-span-2">
-          <CompanyForm company={company} members={members} />
+          <CompanyForm company={company} members={members} tax={taxFields(pack)} />
         </Card>
 
         <Card title={`Contacts (${contacts.length})`}>
@@ -133,6 +136,17 @@ export default async function CompanyPage({ params }: { params: Promise<{ id: st
               </tbody>
             </Table>
           )}
+        </Card>
+
+        <Card
+          title={`Quotes (${quotes.length})`}
+          actions={
+            <Link href={`/app/crm/quotes/new?companyId=${company.id}`} className="text-sm font-medium underline-offset-2 hover:underline">
+              New quote
+            </Link>
+          }
+        >
+          <QuoteList quotes={quotes} currency={cur} today={todayYmd()} />
         </Card>
 
         <Card title={`Tickets (${tickets.length})`}>

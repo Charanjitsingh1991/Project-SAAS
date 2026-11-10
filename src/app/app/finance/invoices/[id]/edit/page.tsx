@@ -33,6 +33,7 @@ export default async function EditInvoicePage({ params }: PageProps<"/app/financ
         customers={customers}
         products={products}
         currency={ws.org.currency}
+        country={ws.org.country}
         cancelHref={`/app/finance/invoices/${inv.id}`}
         values={{
           id: inv.id,
@@ -45,7 +46,7 @@ export default async function EditInvoicePage({ params }: PageProps<"/app/financ
           issueDate: inv.issueDate,
           dueDate: inv.dueDate,
           notes: inv.notes ?? "",
-          lines: lines.map((l) => ({ productId: l.productId, description: l.description, quantity: l.quantity, unitPrice: fromMinor(l.unitPrice), taxRate: l.taxRate })),
+          lines: lines.map((l) => ({ productId: l.productId, description: l.description, quantity: l.quantity, unitPrice: fromMinor(l.unitPrice), taxRate: l.taxRate, taxCode: l.taxCode })),
         }}
       />
     </>

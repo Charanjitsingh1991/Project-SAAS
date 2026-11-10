@@ -6,8 +6,9 @@ import { ActionButton } from "@/components/app/forms";
 import { Card, EmptyState, PageHeader, Stat, StatusBadge, Table, Td, Th } from "@/components/app/ui";
 import { db, schema } from "@/db";
 import { formatDate, formatMoney } from "@/lib/format";
-import { requireWorkspace } from "@/lib/tenancy";
+import { packFor, requireWorkspace } from "@/lib/tenancy";
 import { deleteVendor } from "../../actions";
+import { inventoryTax } from "../../_components/tax";
 import { VendorForm } from "../../_components/vendor-form";
 import { INVENTORY_TABS } from "../../tabs";
 
@@ -19,6 +20,7 @@ export default async function VendorPage({ params }: { params: Promise<{ id: str
   if (!Number.isInteger(id)) notFound();
   const orgId = ws.org.id;
   const cur = ws.org.currency;
+  const tax = inventoryTax(packFor(ws));
 
   const [vendor] = await db.select().from(schema.vendors).where(and(eq(schema.vendors.id, id), eq(schema.vendors.orgId, orgId))).limit(1);
   if (!vendor) notFound();
@@ -34,7 +36,7 @@ export default async function VendorPage({ params }: { params: Promise<{ id: str
     <>
       <PageHeader
         title={vendor.name}
-        description={[vendor.email, vendor.phone, vendor.gstin].filter(Boolean).join(" · ") || "Supplier"}
+        description={[vendor.email, vendor.phone, vendor.gstin && `${tax.idLabel} ${vendor.gstin}`].filter(Boolean).join(" · ") || "Supplier"}
         tabs={INVENTORY_TABS("vendors")}
         actions={
           <>
@@ -57,7 +59,7 @@ export default async function VendorPage({ params }: { params: Promise<{ id: str
       </div>
 
       <Card title="Details">
-        <VendorForm vendor={vendor} />
+        <VendorForm vendor={vendor} tax={tax} />
       </Card>
 
       <Card title="Purchase orders" className="mt-6">

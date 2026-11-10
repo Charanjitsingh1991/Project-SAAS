@@ -4,9 +4,10 @@ import { Card, EmptyState, PageHeader, StatusBadge, Table, Td, Th } from "@/comp
 import { formatMoney } from "@/lib/format";
 import { fmtQty, isLowStock, marginPct } from "@/lib/inventory";
 import { getProductsWithStock, getVendors, getWarehouses } from "@/lib/inventory-data";
-import { requireWorkspace } from "@/lib/tenancy";
+import { packFor, requireWorkspace } from "@/lib/tenancy";
 import { ExportLink, Qty, filterInput } from "../_components/parts";
 import { ProductForm } from "../_components/product-form";
+import { inventoryTax } from "../_components/tax";
 import { INVENTORY_TABS } from "../tabs";
 
 export const metadata: Metadata = { title: "Products" };
@@ -98,7 +99,7 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
       </Card>
 
       <Card title="New product" className="mt-6">
-        <ProductForm vendors={vendors} warehouses={warehouses} />
+        <ProductForm vendors={vendors} warehouses={warehouses} tax={inventoryTax(packFor(ws))} />
       </Card>
     </>
   );
