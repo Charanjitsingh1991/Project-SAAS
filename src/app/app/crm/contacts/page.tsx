@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { and, asc, eq, like, or } from "drizzle-orm";
-import { Download, Plus } from "lucide-react";
+import { Download, Plus, Upload } from "lucide-react";
 import { Card, EmptyState, PageHeader, StatusBadge, Table, Td, Th } from "@/components/app/ui";
 import { db, schema } from "@/db";
 import { LIFECYCLES } from "@/db/schema";
@@ -74,10 +74,15 @@ export default async function ContactsPage({ searchParams }: { searchParams: Pro
         description="People you sell to, ranked by a rule-based lead score."
         tabs={CRM_TABS("contacts")}
         actions={
-          // eslint-disable-next-line @next/next/no-html-link-for-pages -- CSV download
-          <a href="/api/export/contacts" className="inline-flex h-10 items-center gap-2 rounded-full border border-ink/20 px-4 text-sm hover:border-ink">
-            <Download className="size-4" /> Export CSV
-          </a>
+          <div className="flex flex-wrap gap-2">
+            <Link href="/app/crm/contacts/import" className="inline-flex h-10 items-center gap-2 rounded-full border border-ink/20 px-4 text-sm hover:border-ink">
+              <Upload className="size-4" /> Import CSV
+            </Link>
+            {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- CSV download */}
+            <a href="/api/export/contacts" className="inline-flex h-10 items-center gap-2 rounded-full border border-ink/20 px-4 text-sm hover:border-ink">
+              <Download className="size-4" /> Export CSV
+            </a>
+          </div>
         }
       />
 

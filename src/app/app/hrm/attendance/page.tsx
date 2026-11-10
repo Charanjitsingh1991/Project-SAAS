@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { and, asc, eq, gte, lte } from "drizzle-orm";
+import { and, asc, desc, eq, gte, lte } from "drizzle-orm";
 import { CheckCheck } from "lucide-react";
 import { ActionButton } from "@/components/app/forms";
-import { Card, EmptyState, PageHeader } from "@/components/app/ui";
+import { Card, EmptyState, PageHeader, StatusBadge } from "@/components/app/ui";
 import { db, schema } from "@/db";
 import { addDaysYmd, formatDate, todayYmd } from "@/lib/format";
 import { YM_RE, dayOfWeek, isValidYmd, isWeekend, monthRange, shiftMonth, summarizeAttendance } from "@/lib/hrm";
@@ -11,7 +11,7 @@ import { unpaidLeaveByRequest } from "@/lib/hrm-data";
 import { weekendOf } from "@/lib/countries";
 import { requireWorkspace } from "@/lib/tenancy";
 import { cn } from "@/lib/utils";
-import { markAllPresent, saveAttendance } from "../attendance-actions";
+import { decideRegularizationAction, markAllPresent, saveAttendance } from "../attendance-actions";
 import { ATT_BG, ATT_LEGEND } from "../_components/mini-calendar";
 import { hrmTabs } from "../tabs";
 
@@ -20,11 +20,12 @@ export const metadata: Metadata = { title: "Attendance" };
 const CODE: Record<string, string> = { present: "P", absent: "A", half_day: "½", leave: "L", holiday: "H", wfh: "W" };
 const WD = ["S", "M", "T", "W", "T", "F", "S"];
 
-export default async function AttendancePage({ searchParams }: { searchParams: Promise<{ month?: string; view?: string; date?: string }> }) {
+export default async function AttendancePage({ searchParams }: { searchParams: Promise<{ month?: string; view?: string; date?: string; error?: string }> }) {
   const ws = await requireWorkspace({ module: "hrm" });
   const sp = await searchParams;
   const today = todayYmd();
   const daily = sp.view === "day";
+  const requests = sp.view === "requests";
   const date = isValidYmd(sp.date) ? sp.date : today;
   const month = sp.month && YM_RE.test(sp.month) ? sp.month : today.slice(0, 7);
 
@@ -36,17 +37,89 @@ export default async function AttendancePage({ searchParams }: { searchParams: P
         tabs={hrmTabs(ws, "attendance")}
         actions={
           <div className="flex gap-1 text-sm">
-            <Link href={`/app/hrm/attendance?month=${daily ? date.slice(0, 7) : month}`} className={cn("rounded-full border px-4 py-1.5", !daily ? "border-ink bg-ink text-paper" : "border-line hover:border-ink")}>
+            <Link href={`/app/hrm/attendance?month=${daily ? date.slice(0, 7) : month}`} className={cn("rounded-full border px-4 py-1.5", !daily && !requests ? "border-ink bg-ink text-paper" : "border-line hover:border-ink")}>
               Register
             </Link>
             <Link href={`/app/hrm/attendance?view=day&date=${daily ? date : today}`} className={cn("rounded-full border px-4 py-1.5", daily ? "border-ink bg-ink text-paper" : "border-line hover:border-ink")}>
               Daily
             </Link>
+            <Link href="/app/hrm/attendance?view=requests" className={cn("rounded-full border px-4 py-1.5", requests ? "border-ink bg-ink text-paper" : "border-line hover:border-ink")}>
+              Regularisation requests
+            </Link>
           </div>
         }
       />
-      {daily ? <Daily orgId={ws.org.id} weekend={weekendOf(ws.org)} date={date} today={today} /> : <Register orgId={ws.org.id} weekend={weekendOf(ws.org)} month={month} today={today} />}
+      {sp.error && <p role="alert" className="mb-4 rounded-xl bg-signal/10 px-4 py-3 text-sm text-signal">{sp.error}</p>}
+      {requests ? (
+        <Requests orgId={ws.org.id} />
+      ) : daily ? (
+        <Daily orgId={ws.org.id} weekend={weekendOf(ws.org)} date={date} today={today} />
+      ) : (
+        <Register orgId={ws.org.id} weekend={weekendOf(ws.org)} month={month} today={today} />
+      )}
     </>
+  );
+}
+
+async function Requests({ orgId }: { orgId: number }) {
+  const reg = schema.attendanceRegularizations;
+  const rows = await db
+    .select({ r: reg, name: schema.employees.name, code: schema.employees.code })
+    .from(reg)
+    .innerJoin(schema.employees, eq(reg.employeeId, schema.employees.id))
+    .where(eq(reg.orgId, orgId))
+    .orderBy(desc(reg.createdAt), desc(reg.id))
+    .limit(100);
+  const pending = rows.filter((x) => x.r.status === "pending");
+  const decided = rows.filter((x) => x.r.status !== "pending");
+  const btn = "h-8 rounded-full border border-line px-3 text-xs font-medium hover:border-ink";
+  return (
+    <div className="space-y-6">
+      <Card title={`Pending (${pending.length})`}>
+        {pending.length === 0 ? (
+          <EmptyState title="No pending requests" />
+        ) : (
+          <div className="space-y-3">
+            {pending.map(({ r, name, code }) => (
+              <form key={r.id} action={decideRegularizationAction} className="flex flex-wrap items-center gap-3 rounded-xl border border-line p-3 text-sm">
+                <input type="hidden" name="id" value={r.id} />
+                <div className="min-w-48 flex-1">
+                  <p className="font-medium">
+                    {name} <span className="font-mono text-[10px] text-ink-mute">{code}</span>
+                  </p>
+                  <p className="text-ink-soft">
+                    {formatDate(r.date)} · <span className="capitalize">{r.requestedStatus.replace("_", " ")}</span>
+                    {r.checkIn ? ` · in ${r.checkIn}` : ""}
+                    {r.checkOut ? ` · out ${r.checkOut}` : ""}
+                  </p>
+                  <p className="text-xs text-ink-mute">{r.reason}</p>
+                </div>
+                <input name="note" placeholder="Note (optional)" maxLength={300} aria-label="Decision note" className="h-8 rounded-xl border border-line bg-paper/60 px-3 text-xs" />
+                <button name="decision" value="approve" className={cn(btn, "bg-mint")}>Approve</button>
+                <button name="decision" value="reject" className={btn}>Reject</button>
+              </form>
+            ))}
+          </div>
+        )}
+      </Card>
+      <Card title="Recently decided">
+        {decided.length === 0 ? (
+          <EmptyState title="Nothing decided yet" />
+        ) : (
+          <ul className="divide-y divide-line text-sm">
+            {decided.map(({ r, name }) => (
+              <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+                <span>
+                  <span className="font-medium">{name}</span> · {formatDate(r.date)} · <span className="capitalize">{r.requestedStatus.replace("_", " ")}</span>
+                  {r.decisionNote ? <span className="text-ink-mute"> — {r.decisionNote}</span> : null}
+                </span>
+                <StatusBadge value={r.status} />
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+    </div>
   );
 }
 

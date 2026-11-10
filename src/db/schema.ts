@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { blob, index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 /*
  * Conventions:
@@ -28,6 +28,8 @@ export const users = sqliteTable("users", {
   company: text("company"),
   phone: text("phone"), // E.164, e.g. +971501234567
   passwordHash: text("password_hash").notNull(),
+  /** Sessions issued before this moment are rejected (set on password change/reset). */
+  passwordChangedAt: integer("password_changed_at", { mode: "timestamp" }),
   createdAt: createdAt(),
 });
 
@@ -965,7 +967,7 @@ export const kbArticles = sqliteTable(
 );
 
 
-/* ═════════════ HRM: documents, assets, recruitment, performance, claims ═════════════ */
+/* ═════════════ HRM: documents, recruitment, performance, claims ═════════════ */
 
 export const DOCUMENT_TYPES = ["passport", "visa", "emirates_id", "labour_card", "pan", "aadhaar", "driving_licence", "contract", "certificate", "other"] as const;
 
@@ -985,28 +987,6 @@ export const employeeDocuments = sqliteTable(
     createdAt: createdAt(),
   },
   (t) => [index("emp_docs_emp").on(t.employeeId), index("emp_docs_expiry").on(t.orgId, t.expiryDate)],
-);
-
-export const ASSET_STATUSES = ["available", "assigned", "repair", "retired"] as const;
-
-export const assets = sqliteTable(
-  "assets",
-  {
-    id: id(),
-    orgId: orgId(),
-    tag: text("tag").notNull(), // e.g. AST-0007
-    name: text("name").notNull(),
-    category: text("category").notNull().default("Laptop"),
-    serialNumber: text("serial_number"),
-    purchaseDate: text("purchase_date"),
-    cost: money("cost"),
-    status: text("status", { enum: ASSET_STATUSES }).notNull().default("available"),
-    assignedTo: integer("assigned_to").references(() => employees.id, { onDelete: "set null" }),
-    assignedAt: text("assigned_at"),
-    note: text("note"),
-    createdAt: createdAt(),
-  },
-  (t) => [uniqueIndex("asset_org_tag").on(t.orgId, t.tag)],
 );
 
 export const JOB_STATUSES = ["draft", "open", "on_hold", "closed"] as const;
@@ -1357,3 +1337,336 @@ export type Enquiry = typeof enquiries.$inferSelect;
 export type Employee = typeof employees.$inferSelect;
 export type Invoice = typeof invoices.$inferSelect;
 export type Product = typeof products.$inferSelect;
+
+// --- Assets ---
+
+export const companyAssets = sqliteTable(
+  "company_assets",
+  {
+    id: id(),
+    orgId: orgId(),
+    tag: text("tag").notNull(), // AST-0001
+    name: text("name").notNull(),
+    category: text("category", { enum: ["laptop", "phone", "vehicle", "furniture", "other"] }).notNull().default("other"),
+    serialNumber: text("serial_number"),
+    purchaseDate: text("purchase_date"),
+    purchaseCost: money("purchase_cost"),
+    warrantyExpiry: text("warranty_expiry"),
+    status: text("status", { enum: ["available", "assigned", "in_repair", "retired"] }).notNull().default("available"),
+    notes: text("notes"),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("company_asset_org_tag").on(t.orgId, t.tag), index("company_asset_org_status").on(t.orgId, t.status)],
+);
+
+export const assetAssignments = sqliteTable(
+  "asset_assignments",
+  {
+    id: id(),
+    orgId: orgId(),
+    assetId: integer("asset_id")
+      .notNull()
+      .references(() => companyAssets.id, { onDelete: "cascade" }),
+    employeeId: integer("employee_id")
+      .notNull()
+      .references(() => employees.id, { onDelete: "cascade" }),
+    assignedDate: text("assigned_date").notNull(),
+    returnedDate: text("returned_date"),
+    returnCondition: text("return_condition"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("asset_assign_asset").on(t.assetId),
+    index("asset_assign_employee").on(t.orgId, t.employeeId),
+    uniqueIndex("asset_assign_open").on(t.assetId).where(sql`returned_date is null`),
+  ],
+);
+
+// --- Helpdesk round-robin ---
+export const helpdeskAssignment = sqliteTable(
+  "helpdesk_assignment",
+  {
+    id: id(),
+    orgId: orgId(),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(false),
+    memberUserIds: text("member_user_ids").notNull().default("[]"),
+    lastAssignedUserId: integer("last_assigned_user_id"),
+    updatedAt: createdAt(),
+  },
+  (t) => [uniqueIndex("helpdesk_assignment_org").on(t.orgId)],
+);
+
+// --- Employee documents ---
+// Uploaded file vault (bytes in a BLOB); distinct from the employeeDocuments expiry-metadata table.
+export const EMPLOYEE_DOC_TYPES = ["passport", "visa", "national_id", "tax_id", "contract", "certificate", "other"] as const;
+
+export const employeeFiles = sqliteTable(
+  "employee_files",
+  {
+    id: id(),
+    orgId: orgId(),
+    employeeId: integer("employee_id")
+      .notNull()
+      .references(() => employees.id, { onDelete: "cascade" }),
+    docType: text("doc_type", { enum: EMPLOYEE_DOC_TYPES }).notNull().default("other"),
+    title: text("title"),
+    fileName: text("file_name").notNull(),
+    mimeType: text("mime_type").notNull(),
+    size: integer("size").notNull(),
+    expiryDate: text("expiry_date"),
+    data: blob("data", { mode: "buffer" }).notNull(),
+    uploadedBy: integer("uploaded_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("employee_files_emp_idx").on(t.orgId, t.employeeId)],
+);
+
+// --- Password resets ---
+/** One-time reset links; only a SHA-256 hash of the token is stored. */
+export const passwordResets = sqliteTable(
+  "password_resets",
+  {
+    id: id(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull().unique(),
+    expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+    usedAt: integer("used_at", { mode: "timestamp" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("password_resets_user").on(t.userId)],
+);
+
+// --- Attendance regularisation ---
+export const REGULARIZATION_STATUSES = ["pending", "approved", "rejected", "cancelled"] as const;
+
+/** Employee request to correct a day's attendance; approval writes the attendance row. */
+export const attendanceRegularizations = sqliteTable(
+  "attendance_regularizations",
+  {
+    id: id(),
+    orgId: orgId(),
+    employeeId: integer("employee_id")
+      .notNull()
+      .references(() => employees.id, { onDelete: "cascade" }),
+    date: text("date").notNull(),
+    requestedStatus: text("requested_status", { enum: ATTENDANCE_STATUSES }).notNull().default("present"),
+    checkIn: text("check_in"),
+    checkOut: text("check_out"),
+    reason: text("reason").notNull(),
+    status: text("status", { enum: REGULARIZATION_STATUSES }).notNull().default("pending"),
+    decidedBy: integer("decided_by").references(() => users.id, { onDelete: "set null" }),
+    decidedAt: integer("decided_at", { mode: "timestamp" }),
+    decisionNote: text("decision_note"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("att_reg_org_status").on(t.orgId, t.status), index("att_reg_emp").on(t.employeeId, t.date)],
+);
+
+// --- Announcements ---
+export const announcements = sqliteTable(
+  "announcements",
+  {
+    id: id(),
+    orgId: orgId(),
+    title: text("title").notNull(),
+    body: text("body").notNull(),
+    pinned: integer("pinned", { mode: "boolean" }).notNull().default(false),
+    /** Hidden from feeds after this date (YYYY-MM-DD); null = no expiry. */
+    expiresOn: text("expires_on"),
+    postedBy: integer("posted_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("announcements_org").on(t.orgId, t.createdAt)],
+);
+
+// --- HR letters ---
+export const LETTER_KINDS = ["offer", "appointment", "experience", "relieving", "salary_certificate", "noc"] as const;
+
+/** Issued HR letters; the rendered text is frozen at issue time. */
+export const hrLetters = sqliteTable(
+  "hr_letters",
+  {
+    id: id(),
+    orgId: orgId(),
+    employeeId: integer("employee_id")
+      .notNull()
+      .references(() => employees.id, { onDelete: "cascade" }),
+    kind: text("kind", { enum: LETTER_KINDS }).notNull(),
+    number: text("number").notNull(),
+    issuedOn: text("issued_on").notNull(),
+    subject: text("subject").notNull(),
+    body: text("body").notNull(),
+    issuedBy: integer("issued_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("hr_letters_emp").on(t.orgId, t.employeeId), uniqueIndex("hr_letters_org_number").on(t.orgId, t.number)],
+);
+
+/* ═════════════ Integrations ═════════════ */
+
+// --- Outgoing webhooks (Zapier, Make, n8n, custom) and chat notifications (Slack, Teams, Google Chat) ---
+export const WEBHOOK_KINDS = ["webhook", "slack", "teams", "google_chat"] as const;
+
+export const webhookEndpoints = sqliteTable(
+  "webhook_endpoints",
+  {
+    id: id(),
+    orgId: orgId(),
+    kind: text("kind", { enum: WEBHOOK_KINDS }).notNull().default("webhook"),
+    name: text("name").notNull(),
+    /** Encrypted with lib/crypto (URLs of chat webhooks are bearer secrets). */
+    urlEnc: text("url_enc").notNull(),
+    urlHint: text("url_hint").notNull(),
+    /** HMAC-SHA256 signing secret for kind=webhook (encrypted). */
+    secretEnc: text("secret_enc"),
+    /** JSON array of event names, e.g. ["invoice.paid","deal.won"]. */
+    events: text("events").notNull().default("[]"),
+    active: integer("active", { mode: "boolean" }).notNull().default(true),
+    failureCount: integer("failure_count").notNull().default(0),
+    lastDeliveryAt: integer("last_delivery_at", { mode: "timestamp" }),
+    createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("webhook_endpoints_org").on(t.orgId)],
+);
+
+export const WEBHOOK_DELIVERY_STATUSES = ["pending", "succeeded", "failed"] as const;
+
+export const webhookDeliveries = sqliteTable(
+  "webhook_deliveries",
+  {
+    id: id(),
+    orgId: orgId(),
+    endpointId: integer("endpoint_id")
+      .notNull()
+      .references(() => webhookEndpoints.id, { onDelete: "cascade" }),
+    event: text("event").notNull(),
+    /** Unique event id sent to receivers for idempotency. */
+    eventId: text("event_id").notNull(),
+    payload: text("payload").notNull(),
+    status: text("status", { enum: WEBHOOK_DELIVERY_STATUSES }).notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    responseStatus: integer("response_status"),
+    responseBody: text("response_body"),
+    nextAttemptAt: integer("next_attempt_at", { mode: "timestamp" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("webhook_deliveries_endpoint").on(t.endpointId, t.createdAt), index("webhook_deliveries_retry").on(t.status, t.nextAttemptAt)],
+);
+
+// --- REST API keys ---
+export const API_SCOPES = ["read", "write"] as const;
+
+export const apiKeys = sqliteTable(
+  "api_keys",
+  {
+    id: id(),
+    orgId: orgId(),
+    name: text("name").notNull(),
+    /** First characters shown in the UI, e.g. "sm_live_ab12". */
+    prefix: text("prefix").notNull(),
+    /** SHA-256 hex of the full key; the key itself is shown once. */
+    keyHash: text("key_hash").notNull().unique(),
+    scope: text("scope", { enum: API_SCOPES }).notNull().default("read"),
+    createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+    lastUsedAt: integer("last_used_at", { mode: "timestamp" }),
+    revokedAt: integer("revoked_at", { mode: "timestamp" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("api_keys_org").on(t.orgId)],
+);
+
+// --- Calendar feeds (iCal subscription for Google / Outlook / Apple Calendar) ---
+export const calendarFeeds = sqliteTable(
+  "calendar_feeds",
+  {
+    id: id(),
+    orgId: orgId(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** SHA-256 hex of the secret token in the feed URL. */
+    tokenHash: text("token_hash").notNull().unique(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("calendar_feeds_org_user").on(t.orgId, t.userId)],
+);
+
+// --- Per-workspace third-party credentials (e.g. Razorpay), encrypted ---
+export const ORG_INTEGRATION_PROVIDERS = ["razorpay"] as const;
+
+export const orgIntegrations = sqliteTable(
+  "org_integrations",
+  {
+    id: id(),
+    orgId: orgId(),
+    provider: text("provider", { enum: ORG_INTEGRATION_PROVIDERS }).notNull(),
+    /** Encrypted JSON of credentials (lib/crypto). */
+    configEnc: text("config_enc").notNull(),
+    /** Non-secret display hint, e.g. key id. */
+    hint: text("hint"),
+    active: integer("active", { mode: "boolean" }).notNull().default(true),
+    updatedAt: createdAt(),
+  },
+  (t) => [uniqueIndex("org_integrations_org_provider").on(t.orgId, t.provider)],
+);
+
+/** Online payment links created for invoices (Razorpay). */
+export const invoicePaymentLinks = sqliteTable(
+  "invoice_payment_links",
+  {
+    id: id(),
+    orgId: orgId(),
+    invoiceId: integer("invoice_id")
+      .notNull()
+      .references(() => invoices.id, { onDelete: "cascade" }),
+    provider: text("provider", { enum: ORG_INTEGRATION_PROVIDERS }).notNull(),
+    externalId: text("external_id").notNull(),
+    url: text("url").notNull(),
+    amount: integer("amount").notNull(),
+    status: text("status", { enum: ["created", "paid", "cancelled", "expired"] }).notNull().default("created"),
+    /** Payment id recorded on the invoice once paid (idempotency for webhooks). */
+    paymentRef: text("payment_ref"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("invoice_payment_links_invoice").on(t.invoiceId), uniqueIndex("invoice_payment_links_ext").on(t.provider, t.externalId)],
+);
+
+// --- Social sign-in (Google, Microsoft) ---
+export const OAUTH_PROVIDERS = ["google", "microsoft"] as const;
+
+export const oauthAccounts = sqliteTable(
+  "oauth_accounts",
+  {
+    id: id(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    provider: text("provider", { enum: OAUTH_PROVIDERS }).notNull(),
+    /** Provider's stable subject id (OIDC `sub`). */
+    subject: text("subject").notNull(),
+    email: text("email").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("oauth_provider_subject").on(t.provider, t.subject), index("oauth_user").on(t.userId)],
+);
+
+// --- Ask AI ---
+/** One row per question, for daily limits and an audit trail. */
+export const aiQueries = sqliteTable(
+  "ai_queries",
+  {
+    id: id(),
+    orgId: orgId(),
+    userId: integer("user_id").references(() => users.id, { onDelete: "set null" }),
+    question: text("question").notNull(),
+    /** JSON array of tool names used to answer. */
+    tools: text("tools").notNull().default("[]"),
+    mode: text("mode", { enum: ["ai", "rules"] }).notNull(),
+    ok: integer("ok", { mode: "boolean" }).notNull().default(true),
+    createdAt: createdAt(),
+  },
+  (t) => [index("ai_queries_org_created").on(t.orgId, t.createdAt)],
+);

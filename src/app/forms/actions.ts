@@ -5,6 +5,7 @@ import { z } from "zod";
 import { db, schema } from "@/db";
 import { STAGE_PROBABILITY } from "@/db/schema";
 import { logActivity } from "@/lib/activity";
+import { emitEvent } from "@/lib/integrations/events";
 import type { FormState } from "@/lib/definitions";
 import { formObject, todayYmd } from "@/lib/format";
 import { DUPLICATE_WINDOW_MS, isBot, leadDealTitle, ORG_SUBMISSIONS_PER_WINDOW, WebLeadSchema } from "@/lib/webforms";
@@ -90,5 +91,6 @@ export async function submitWebLead(_: FormState, fd: FormData): Promise<FormSta
     { orgId, userId: null },
     { module: "crm", entityType: "deal", entityId: deal.id, action: "web_form", summary: `New web form lead from ${lead.name}${lead.company ? ` (${lead.company})` : ""}` },
   );
+  await emitEvent({ orgId, userId: null }, "lead.captured", { id: contact.id, contact_id: contact.id, deal_id: deal.id, name: lead.name, email: lead.email, company: lead.company ?? null, source: "website" });
   return { ok: true, message: THANKS };
 }

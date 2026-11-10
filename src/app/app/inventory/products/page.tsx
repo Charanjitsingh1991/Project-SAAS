@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { Upload } from "lucide-react";
 import { Card, EmptyState, PageHeader, StatusBadge, Table, Td, Th } from "@/components/app/ui";
 import { formatMoney } from "@/lib/format";
 import { fmtQty, isLowStock, marginPct } from "@/lib/inventory";
@@ -31,7 +32,14 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
 
   return (
     <>
-      <PageHeader title="Inventory" description="Every SKU with live stock, weighted-average cost and margin." tabs={INVENTORY_TABS("products")} actions={<ExportLink href="/api/export/products" />} />
+      <PageHeader title="Inventory" description="Every SKU with live stock, weighted-average cost and margin." tabs={INVENTORY_TABS("products")} actions={
+        <div className="flex flex-wrap gap-2">
+          <Link href="/app/inventory/products/import" className="inline-flex h-10 items-center gap-2 rounded-full border border-ink/20 px-4 text-sm hover:border-ink">
+            <Upload className="size-4" /> Import CSV
+          </Link>
+          <ExportLink href="/api/export/products" />
+        </div>
+      } />
 
       <form className="mb-5 flex flex-wrap gap-2">
         <input name="q" defaultValue={sp.q ?? ""} placeholder="Search name, SKU or barcode" className={`${filterInput} w-72 max-w-full`} />

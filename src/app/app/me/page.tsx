@@ -4,6 +4,8 @@ import { and, desc, eq, gte, inArray, lte } from "drizzle-orm";
 import { Clock } from "lucide-react";
 import { ActionButton, ActionForm, Input, Select, SubmitButton } from "@/components/app/forms";
 import { Badge, Card, EmptyState, PageHeader, Stat, StatusBadge, Table, Td, Th, type Tone } from "@/components/app/ui";
+import { AnnouncementsFeed } from "@/components/app/announcements-feed";
+import { MyLetters } from "@/components/app/my-letters";
 import { db, schema } from "@/db";
 import { formatDate, formatMoney, formatPeriod, initials, todayYmd } from "@/lib/format";
 import { EXPENSE_CATEGORIES } from "@/lib/accounting";
@@ -12,11 +14,14 @@ import { monthRange } from "@/lib/hrm";
 import { leaveBalances, resolveMyEmployee } from "@/lib/hrm-data";
 import { hasFeature, packFor, planModules, requireWorkspace, type ActiveWorkspace } from "@/lib/tenancy";
 import { MiniCalendar } from "../hrm/_components/mini-calendar";
+import { DocumentList, listDocuments } from "../hrm/[id]/documents-tab";
+import { RegularizationCard, TeamApprovals } from "./team-approvals";
 import { applyMyLeave, cancelMyLeave, checkIn, checkOut, submitMyClaim, withdrawMyClaim } from "./actions";
 
 export const metadata: Metadata = { title: "My space" };
 
-export default async function MySpacePage() {
+export default async function MySpacePage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
+  const sp = await searchParams;
   const ws = await requireWorkspace();
   const orgId = ws.org.id;
   const emp = await resolveMyEmployee(orgId, ws.user);
@@ -64,6 +69,7 @@ export default async function MySpacePage() {
       .limit(12),
   ]);
 
+  const myDocs = await listDocuments(orgId, emp.id);
   const todayRow = att.find((a) => a.date === today);
   const present = att.filter((a) => a.status === "present" || a.status === "wfh").length;
   const activeBalances = balances.filter((b) => b.type.active);
@@ -86,6 +92,8 @@ export default async function MySpacePage() {
           </>
         }
       />
+
+      <AnnouncementsFeed orgId={orgId} limit={3} />
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card title="Profile">
@@ -220,10 +228,20 @@ export default async function MySpacePage() {
         </Card>
       </div>
 
+      {sp.error && <p role="alert" className="mt-6 rounded-xl bg-signal/10 px-4 py-3 text-sm text-signal">{sp.error}</p>}
+      <TeamApprovals orgId={orgId} managerId={emp.id} today={today} />
+
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
+        <RegularizationCard orgId={orgId} employeeId={emp.id} today={today} />
         <Card title="My attendance — this month">
           <MiniCalendar month={month} rows={att} holidays={new Map(hols.map((h) => [h.date, h.name]))} today={today} />
         </Card>
+
+        <Card title="My documents">
+          <DocumentList docs={myDocs} canManage={false} />
+        </Card>
+
+        <MyLetters orgId={orgId} employeeId={emp.id} />
 
         <Card title="My payslips">
           {slips.length === 0 ? (

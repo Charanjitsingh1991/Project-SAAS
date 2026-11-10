@@ -10,7 +10,7 @@ import { MODULES } from "@/lib/modules";
 import { INVITABLE_ROLES, MODULE_ACCESS, ROLE_INFO, type ModuleKey } from "@/lib/roles";
 import { requireWorkspace } from "@/lib/tenancy";
 import { appOrigin } from "@/lib/url";
-import { changeRole, inviteMember, removeMember, revokeInvite, updateWorkspace } from "./actions";
+import { changeRole, inviteMember, removeMember, resendInvite, revokeInvite, updateWorkspace } from "./actions";
 
 export const metadata: Metadata = { title: "Team & roles" };
 
@@ -96,9 +96,14 @@ export default async function TeamPage() {
                       </p>
                     </div>
                     <CopyLink url={`${origin}/invite/${i.token}`} />
-                    <ActionButton action={revokeInvite} fields={{ id: i.id }}>
-                      Revoke
-                    </ActionButton>
+                    <div className="flex gap-2">
+                      <ActionButton action={resendInvite} fields={{ id: i.id }}>
+                        Resend
+                      </ActionButton>
+                      <ActionButton action={revokeInvite} fields={{ id: i.id }}>
+                        Revoke
+                      </ActionButton>
+                    </div>
                   </li>
                 ))}
               </ul>

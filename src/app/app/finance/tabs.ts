@@ -1,9 +1,10 @@
-export type FinanceTab = "overview" | "invoices" | "credit-notes" | "recurring" | "expenses" | "bank" | "reports" | "accounts" | "journal";
+export type FinanceTab = "overview" | "invoices" | "credit-notes" | "statements" | "recurring" | "expenses" | "bank" | "reports" | "accounts" | "journal";
 
 export const FINANCE_TABS = (active: FinanceTab) => [
   { href: "/app/finance", label: "Overview", active: active === "overview" },
   { href: "/app/finance/invoices", label: "Invoices", active: active === "invoices" },
   { href: "/app/finance/credit-notes", label: "Credit notes", active: active === "credit-notes" },
+  { href: "/app/finance/statements", label: "Statements", active: active === "statements" },
   { href: "/app/finance/recurring", label: "Recurring", active: active === "recurring" },
   { href: "/app/finance/expenses", label: "Expenses", active: active === "expenses" },
   { href: "/app/finance/bank", label: "Bank", active: active === "bank" },

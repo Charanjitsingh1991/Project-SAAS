@@ -9,7 +9,7 @@ import { PRIORITIES, TICKET_CHANNELS, TICKET_STATUSES } from "@/db/schema";
 import { ctxOf, logActivity } from "@/lib/activity";
 import type { FormState } from "@/lib/definitions";
 import { formObject } from "@/lib/format";
-import { addSystemMessage, isMember, setTicketStatus, slaDuesFor, uniqueKbSlug } from "@/lib/helpdesk-data";
+import { addSystemMessage, getHelpdeskAgents, isMember, setTicketStatus, slaDuesFor, uniqueKbSlug } from "@/lib/helpdesk-data";
 import { createTicket } from "@/lib/helpdesk-data";
 import { requireWorkspace } from "@/lib/tenancy";
 
@@ -195,6 +195,23 @@ export async function saveSlaAction(_: FormState, fd: FormData): Promise<FormSta
   await logActivity(ctxOf(ws), { module: "helpdesk", entityType: "sla_policy", action: "updated", summary: "Updated SLA policies (applies to new tickets and priority changes)" });
   refresh();
   return { ok: true, message: "SLA policies saved." };
+}
+
+export async function saveAssignmentAction(_: FormState, fd: FormData): Promise<FormState> {
+  const ws = await requireWorkspace({ module: "helpdesk", manage: true });
+  const orgId = ws.org.id;
+  const enabled = fd.get("enabled") === "on";
+  const requested = new Set(fd.getAll("agents").map((v) => Number(v)));
+  const agents = (await getHelpdeskAgents(orgId)).map((a) => a.id).filter((id) => requested.has(id));
+  if (enabled && agents.length === 0) return { message: "Pick at least one agent for the rotation." };
+  const memberUserIds = JSON.stringify(agents);
+  await db
+    .insert(schema.helpdeskAssignment)
+    .values({ orgId, enabled, memberUserIds })
+    .onConflictDoUpdate({ target: schema.helpdeskAssignment.orgId, set: { enabled, memberUserIds, updatedAt: new Date() } });
+  await logActivity(ctxOf(ws), { module: "helpdesk", entityType: "assignment", action: "updated", summary: `Round-robin assignment ${enabled ? `on (${agents.length} agents)` : "off"}` });
+  refresh();
+  return { ok: true, message: "Assignment settings saved." };
 }
 
 const CannedSchema = z.object({ id: optId, title: z.string().min(2, "Add a title.").max(80), body: z.string().min(2, "Add the response text.").max(5000) });

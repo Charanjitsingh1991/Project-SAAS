@@ -7,6 +7,7 @@ import { z } from "zod";
 import { db, schema } from "@/db";
 import { ACTIVITY_TYPES, DEAL_STAGES, LEAD_SOURCES, LIFECYCLES, STAGE_PROBABILITY, type DealStage } from "@/db/schema";
 import { ctxOf, logActivity } from "@/lib/activity";
+import { emitEvent } from "@/lib/integrations/events";
 import type { FormState } from "@/lib/definitions";
 import { formObject, toMinor } from "@/lib/format";
 import { onDealWon } from "@/lib/posting";
@@ -70,7 +71,11 @@ async function changeStage(ws: Ws, dealId: number, stage: DealStage, lostReason?
     action: "stage_changed",
     summary: `Moved ${deal.title} from ${deal.stage} to ${stage}${stage === "lost" && lostReason ? ` (${lostReason})` : ""}`,
   });
+  await emitEvent(ctxOf(ws), "deal.stage_changed", { id: deal.id, title: deal.title, from: deal.stage, to: stage, value: deal.value });
   if (stage === "won") await onDealWon(ctxOf(ws), deal.id);
+  if (stage === "won" || stage === "lost") {
+    await emitEvent(ctxOf(ws), stage === "won" ? "deal.won" : "deal.lost", { id: deal.id, title: deal.title, value: deal.value, ...(stage === "lost" ? { lost_reason: lostReason ?? null } : {}) });
+  }
   return deal;
 }
 
@@ -119,6 +124,7 @@ export async function createDeal(_: FormState, fd: FormData): Promise<FormState>
     })
     .returning({ id: schema.deals.id });
   await logActivity(ctxOf(ws), { module: "crm", entityType: "deal", entityId: row.id, action: "created", summary: `Created deal ${d.title} in ${d.stage}` });
+  await emitEvent(ctxOf(ws), "deal.created", { id: row.id, title: d.title, value, stage: d.stage });
   if (d.stage === "won") await onDealWon(ctxOf(ws), row.id);
   refresh();
   return { ok: true, message: `${d.title} added.` };
@@ -311,6 +317,7 @@ export async function createCompany(_: FormState, fd: FormData): Promise<FormSta
     .values({ ...parsed.data, orgId: ws.org.id, ownerId: parsed.data.ownerId ?? ws.user.id, country: parsed.data.country ?? parsed.pack.name })
     .returning({ id: schema.companies.id });
   await logActivity(ctxOf(ws), { module: "crm", entityType: "company", entityId: row.id, action: "created", summary: `Added company ${parsed.data.name}` });
+  await emitEvent(ctxOf(ws), "company.created", { id: row.id, name: parsed.data.name });
   refresh();
   return { ok: true, message: `${parsed.data.name} added.` };
 }
@@ -384,6 +391,7 @@ export async function createContact(_: FormState, fd: FormData): Promise<FormSta
     .values({ ...parsed.data, orgId: ws.org.id, ownerId: parsed.data.ownerId ?? ws.user.id })
     .returning({ id: schema.contacts.id });
   await logActivity(ctxOf(ws), { module: "crm", entityType: "contact", entityId: row.id, action: "created", summary: `Added contact ${parsed.data.name}` });
+  await emitEvent(ctxOf(ws), "contact.created", { id: row.id, name: parsed.data.name, email: parsed.data.email ?? null });
   refresh();
   return { ok: true, message: `${parsed.data.name} added.` };
 }

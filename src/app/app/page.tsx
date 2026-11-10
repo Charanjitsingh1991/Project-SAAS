@@ -1,15 +1,18 @@
 import type { Metadata } from "next";
 import { and, desc, eq, gt, inArray, lt, ne, sql } from "drizzle-orm";
 import Link from "next/link";
+import { Suspense } from "react";
 import { ArrowUpRight, Lock, Sparkles, Zap } from "lucide-react";
 import { loadSampleData } from "@/app/app/actions";
+import { AnnouncementsFeed } from "@/components/app/announcements-feed";
 import { SubmitButton } from "@/components/app/forms";
 import { Card, EmptyState, PageHeader, Stat } from "@/components/app/ui";
 import { db, schema } from "@/db";
 import { formatMoneyCompact, timeAgo, todayYmd } from "@/lib/format";
 import { MODULES } from "@/lib/modules";
 import { canManage, roleCanUse, type ModuleKey } from "@/lib/roles";
-import { planModules, requireWorkspace } from "@/lib/tenancy";
+import { hasFeature, planModules, requireWorkspace } from "@/lib/tenancy";
+import { AskBar } from "@/components/app/ask-bar";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Overview" };
@@ -106,6 +109,16 @@ export default async function OverviewPage(props: PageProps<"/app">) {
           </form>
         </div>
       )}
+
+      {hasFeature(ws, "copilot") && (
+        <div className="mb-6">
+          <AskBar />
+        </div>
+      )}
+
+      <Suspense fallback={null}>
+        <AnnouncementsFeed orgId={orgId} limit={5} />
+      </Suspense>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {tiles

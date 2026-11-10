@@ -8,6 +8,7 @@ import { db, schema } from "@/db";
 import { ctxOf, logActivity } from "@/lib/activity";
 import type { FormState } from "@/lib/definitions";
 import { addDaysYmd, formObject, todayYmd } from "@/lib/format";
+import { emitEvent } from "@/lib/integrations/events";
 import type { CountryPack } from "@/lib/countries";
 import { UAE_COMPONENT_KEYS, isValidYmd, packageFromComponents, parseEmployeeFields } from "@/lib/hrm";
 import { createChecklist } from "@/lib/hrm-data";
@@ -167,6 +168,7 @@ export async function createEmployee(_: FormState, fd: FormData): Promise<FormSt
     .returning({ id: schema.employees.id });
   await createChecklist(orgId, row.id, "onboarding", v.joinDate);
   await logActivity(ctxOf(ws), { module: "hrm", entityType: "employee", entityId: row.id, action: "created", summary: `Added ${v.name} (${code}) as ${v.designation}` });
+  await emitEvent(ctxOf(ws), "employee.created", { id: row.id, code, name: v.name, designation: v.designation, join_date: v.joinDate });
   redirect(`/app/hrm/${row.id}`);
 }
 
@@ -300,6 +302,7 @@ export async function markExited(_: FormState, fd: FormData): Promise<FormState>
     .set({ status: "cancelled", decidedBy: ws.user.id, decidedAt: new Date() })
     .where(and(eq(schema.leaveRequests.orgId, orgId), eq(schema.leaveRequests.employeeId, emp.id), eq(schema.leaveRequests.status, "pending")));
   await logActivity(ctxOf(ws), { module: "hrm", entityType: "employee", entityId: emp.id, action: "exited", summary: `${emp.name} exited on ${raw.exitDate} — ${raw.exitReason}` });
+  await emitEvent(ctxOf(ws), "employee.exited", { id: emp.id, name: emp.name, exit_date: raw.exitDate });
   refresh();
   return { ok: true, message: "Marked as exited." };
 }

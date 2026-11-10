@@ -54,7 +54,7 @@ async function InviteBody({ params }: { params: PageProps<"/invite/[token]">["pa
             <Link href={`/signup?invite=${token}`} className="flex-1 rounded-full bg-ink py-3 text-center font-medium text-paper">
               Create my account
             </Link>
-            <Link href={`/login?next=/invite/${token}`} className="flex-1 rounded-full border border-ink/20 py-3 text-center font-medium">
+            <Link href={`/login?next=/invite/${token}&invite=${token}`} className="flex-1 rounded-full border border-ink/20 py-3 text-center font-medium">
               I already have an account
             </Link>
           </div>

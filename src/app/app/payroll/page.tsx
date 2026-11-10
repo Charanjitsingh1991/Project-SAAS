@@ -44,6 +44,7 @@ export default async function PayrollPage() {
           { href: "/app/payroll", label: "Runs", active: true },
           { href: "/app/payroll/loans", label: "Loans & advances" },
           { href: "/app/payroll/settlements", label: "Final settlements" },
+          ...(pack.code === "IN" ? [{ href: "/app/payroll/tax-statements", label: "Tax statements" }] : []),
         ]}
       />
 

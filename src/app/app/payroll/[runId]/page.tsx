@@ -8,6 +8,7 @@ import { db, schema } from "@/db";
 import { formatDate, formatMoney, formatPeriod, fromMinor, todayYmd } from "@/lib/format";
 import { parseBreakdown, sumLines, type PayslipBreakdown } from "@/lib/payroll-types";
 import { legacyBreakdown } from "@/lib/posting";
+import { buildEcr, buildEsi } from "@/lib/statutory-in";
 import { packFor, requireWorkspace } from "@/lib/tenancy";
 import { adjustSlip, approveRun, deleteRun, markPaid, recalcRun } from "../actions";
 
@@ -60,6 +61,8 @@ export default async function RunPage(props: PageProps<"/app/payroll/[runId]">) 
       iban: schema.employees.iban,
       routing: schema.employees.bankRoutingCode,
       personId: schema.employees.wpsPersonId,
+      uan: schema.employees.uan,
+      exitDate: schema.employees.exitDate,
     })
     .from(schema.payslips)
     .leftJoin(schema.employees, eq(schema.payslips.employeeId, schema.employees.id))
@@ -85,6 +88,10 @@ export default async function RunPage(props: PageProps<"/app/payroll/[runId]">) 
     }
     return { label, e, r, n };
   });
+
+  const statSlips = slips.map((x) => ({ employeeId: x.p.employeeId, code: x.p.employeeCode, name: x.p.employeeName, gross: x.p.gross, paidDays: x.p.paidDays, lopDays: x.p.lopDays, breakdown: bds.get(x.p.id)!, uan: x.uan, exitDate: x.exitDate }));
+  const ecr = !uae && !draft ? buildEcr(statSlips) : null;
+  const esi = !uae && !draft ? buildEsi(statSlips, run.period) : null;
 
   return (
     <>
@@ -175,6 +182,37 @@ export default async function RunPage(props: PageProps<"/app/payroll/[runId]">) 
         </Card>
       )}
 
+      {tab === "statutory" && ecr && esi && (
+        <Card
+          title="India statutory files"
+          className="mb-6"
+          actions={
+            <span className="flex gap-4">
+              {ecr.count > 0 && (
+                <a href={`/api/payroll/${run.id}/ecr`} className="text-sm font-medium underline-offset-4 hover:underline">
+                  Download PF ECR
+                </a>
+              )}
+              {esi.count > 0 && (
+                <a href={`/api/payroll/${run.id}/esi`} className="text-sm font-medium underline-offset-4 hover:underline">
+                  Download ESI file
+                </a>
+              )}
+            </span>
+          }
+        >
+          <p className="text-sm text-ink-soft">
+            PF ECR (EPFO ECR 2.0 text) has {ecr.count} member{ecr.count === 1 ? "" : "s"}; the ESI contribution CSV has {esi.count} employee{esi.count === 1 ? "" : "s"}. Upload them on the EPFO / ESIC portals — these files are aids, not filed returns.
+          </p>
+          {ecr.missingUan.length > 0 && (
+            <p className="mt-3 text-sm text-signal">
+              Excluded from the ECR file — missing or invalid 12-digit UAN: {ecr.missingUan.map((m) => `${m.name} (${m.code})`).join(", ")}. Add the UAN on the employee record and download again.
+            </p>
+          )}
+          {esi.count > 0 && <p className="mt-3 text-sm text-ink-soft">ESIC IP numbers aren&apos;t stored in the app, so the IP Number column is blank — fill it in before uploading.</p>}
+        </Card>
+      )}
+
       {tab === "statutory" && (
         <Card title="Statutory summary" className="mb-6">
           <Table>
@@ -211,6 +249,16 @@ export default async function RunPage(props: PageProps<"/app/payroll/[runId]">) 
               {uae && !draft && (
                 <a href={`/api/payroll/${run.id}/sif`} className="text-sm font-medium underline-offset-4 hover:underline">
                   Download WPS SIF
+                </a>
+              )}
+              {ecr && ecr.count > 0 && (
+                <a href={`/api/payroll/${run.id}/ecr`} className="text-sm font-medium underline-offset-4 hover:underline">
+                  Download PF ECR
+                </a>
+              )}
+              {esi && esi.count > 0 && (
+                <a href={`/api/payroll/${run.id}/esi`} className="text-sm font-medium underline-offset-4 hover:underline">
+                  Download ESI file
                 </a>
               )}
               <a href={`/api/export/payslips?run=${run.id}`} className="text-sm font-medium underline-offset-4 hover:underline">

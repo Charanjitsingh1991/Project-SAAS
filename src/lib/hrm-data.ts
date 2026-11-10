@@ -5,7 +5,9 @@ import { logActivity, type Ctx } from "./activity";
 import { parseAutomations } from "./automations";
 import { weekendOf } from "./countries";
 import { addDaysYmd, formatDate } from "./format";
+import { emitEvent } from "./integrations/events";
 import { ONBOARDING_TEMPLATE, OFFBOARDING_TEMPLATE, countLeaveDays, isValidYmd, leaveBalance, workingDates } from "./hrm";
+import { REGULARIZATION_STATUSES_ALLOWED, canDecideRequest, parseRegularizationTimes, regularizationDateError } from "./approvals";
 
 export async function holidaySet(orgId: number, from: string, to: string) {
   const rows = await db
@@ -121,6 +123,7 @@ export async function submitLeave(ctx: Ctx, input: LeaveInput): Promise<LeaveRes
     action: "applied",
     summary: `${emp.name} applied for ${days} day(s) of ${type.name} (${formatDate(startDate)}${endDate !== startDate ? ` – ${formatDate(endDate)}` : ""})`,
   });
+  await emitEvent(ctx, "leave.requested", { id: row.id, employee: emp.name, leave_type: type.name, start_date: startDate, end_date: endDate, days });
   return { ok: true, id: row.id, days };
 }
 
@@ -201,6 +204,15 @@ export async function decideLeave(
     action: action === "approve" ? "approved" : action === "reject" ? "rejected" : "cancelled",
     summary: `${action === "approve" ? "Approved" : action === "reject" ? "Rejected" : "Cancelled"} ${emp?.name ?? "employee"}'s ${req.days} day(s) of ${type?.name ?? "leave"} (${formatDate(req.startDate)})`,
   });
+  await emitEvent(ctx, "leave.decided", {
+    id: req.id,
+    employee: emp?.name ?? null,
+    leave_type: type?.name ?? null,
+    decision: action === "approve" ? "approved" : action === "reject" ? "rejected" : "cancelled",
+    start_date: req.startDate,
+    end_date: req.endDate,
+    days: req.days,
+  });
   return { ok: true };
 }
 
@@ -259,3 +271,135 @@ export async function unpaidLeaveByRequest(orgId: number) {
   return new Map(rows.map((r) => [r.id, r.half ? 0.5 : 1]));
 }
 
+
+/** Checks whether `user` may decide a request of `subjectEmployeeId` (HRM access or reporting manager; never self). */
+export async function authorizeDecision(
+  orgId: number,
+  user: { id: number; email: string },
+  hrm: boolean,
+  subjectEmployeeId: number,
+  requestStatus?: string,
+) {
+  const [[subject], mine] = await Promise.all([
+    db
+      .select({ id: schema.employees.id, managerId: schema.employees.managerId })
+      .from(schema.employees)
+      .where(and(eq(schema.employees.id, subjectEmployeeId), eq(schema.employees.orgId, orgId)))
+      .limit(1),
+    resolveMyEmployee(orgId, user),
+  ]);
+  if (!subject) return { ok: false as const, message: "Request not found." };
+  return canDecideRequest({ hrm, actorEmployeeId: mine?.id ?? null, subjectEmployeeId: subject.id, subjectManagerId: subject.managerId, requestStatus });
+}
+
+/** Employees who report directly to the user's linked employee record. */
+export async function directReports(orgId: number, user: { id: number; email: string }) {
+  const mine = await resolveMyEmployee(orgId, user);
+  if (!mine) return { me: null, reports: [] as { id: number; name: string; code: string }[] };
+  const reports = await db
+    .select({ id: schema.employees.id, name: schema.employees.name, code: schema.employees.code })
+    .from(schema.employees)
+    .where(and(eq(schema.employees.orgId, orgId), eq(schema.employees.managerId, mine.id), ne(schema.employees.status, "exited")));
+  return { me: mine, reports };
+}
+
+export type RegularizationInput = {
+  employeeId: number;
+  date: string;
+  requestedStatus: string;
+  checkIn: string;
+  checkOut: string;
+  reason: string;
+  today: string;
+};
+
+export async function submitRegularization(ctx: Ctx, input: RegularizationInput): Promise<{ ok: true; id: number } | { ok: false; errors: Record<string, string[]> }> {
+  const dateErr = regularizationDateError(input.date, input.today);
+  if (dateErr) return { ok: false, errors: { date: [dateErr] } };
+  if (!(REGULARIZATION_STATUSES_ALLOWED as readonly string[]).includes(input.requestedStatus)) return { ok: false, errors: { requestedStatus: ["Pick present, half day or WFH."] } };
+  const reason = input.reason.trim();
+  if (reason.length < 3) return { ok: false, errors: { reason: ["Give a short reason."] } };
+  const times = parseRegularizationTimes(input.checkIn, input.checkOut);
+  if (times.error) return { ok: false, errors: { checkIn: [times.error] } };
+
+  const [emp] = await db
+    .select({ id: schema.employees.id, name: schema.employees.name })
+    .from(schema.employees)
+    .where(and(eq(schema.employees.id, input.employeeId), eq(schema.employees.orgId, ctx.orgId)))
+    .limit(1);
+  if (!emp) return { ok: false, errors: { date: ["Employee not found."] } };
+
+  const [[dup], [row], hols] = await Promise.all([
+    db
+      .select({ id: schema.attendanceRegularizations.id })
+      .from(schema.attendanceRegularizations)
+      .where(and(eq(schema.attendanceRegularizations.orgId, ctx.orgId), eq(schema.attendanceRegularizations.employeeId, emp.id), eq(schema.attendanceRegularizations.date, input.date), eq(schema.attendanceRegularizations.status, "pending")))
+      .limit(1),
+    db
+      .select({ leaveRequestId: schema.attendance.leaveRequestId })
+      .from(schema.attendance)
+      .where(and(eq(schema.attendance.orgId, ctx.orgId), eq(schema.attendance.employeeId, emp.id), eq(schema.attendance.date, input.date)))
+      .limit(1),
+    holidaySet(ctx.orgId, input.date, input.date),
+  ]);
+  if (dup) return { ok: false, errors: { date: ["You already have a pending request for this date."] } };
+  if (row?.leaveRequestId) return { ok: false, errors: { date: ["That day is covered by approved leave."] } };
+  if (hols.has(input.date)) return { ok: false, errors: { date: ["That day is a holiday."] } };
+
+  const [created] = await db
+    .insert(schema.attendanceRegularizations)
+    .values({ orgId: ctx.orgId, employeeId: emp.id, date: input.date, requestedStatus: input.requestedStatus as (typeof schema.ATTENDANCE_STATUSES)[number], checkIn: times.checkIn, checkOut: times.checkOut, reason: reason.slice(0, 500) })
+    .returning({ id: schema.attendanceRegularizations.id });
+  await logActivity(ctx, { module: "hrm", entityType: "attendance_regularization", entityId: created.id, action: "requested", summary: `${emp.name} requested attendance correction for ${formatDate(input.date)}` });
+  return { ok: true, id: created.id };
+}
+
+/** approve / reject (HR or manager, authorised by the caller) or cancel (own pending request only via `onlyEmployeeId`). */
+export async function decideRegularization(
+  ctx: Ctx,
+  id: number,
+  action: "approve" | "reject" | "cancel",
+  opts: { note?: string; onlyEmployeeId?: number } = {},
+): Promise<DecideResult> {
+  const { orgId } = ctx;
+  const [req] = await db
+    .select({ r: schema.attendanceRegularizations, name: schema.employees.name })
+    .from(schema.attendanceRegularizations)
+    .innerJoin(schema.employees, eq(schema.attendanceRegularizations.employeeId, schema.employees.id))
+    .where(and(eq(schema.attendanceRegularizations.id, id), eq(schema.attendanceRegularizations.orgId, orgId)))
+    .limit(1);
+  if (!req || (opts.onlyEmployeeId !== undefined && req.r.employeeId !== opts.onlyEmployeeId)) return { ok: false, message: "Request not found." };
+  if (req.r.status !== "pending") return { ok: false, message: "This request has already been closed." };
+
+  if (action === "approve") {
+    const [[row], hols] = await Promise.all([
+      db
+        .select({ leaveRequestId: schema.attendance.leaveRequestId })
+        .from(schema.attendance)
+        .where(and(eq(schema.attendance.orgId, orgId), eq(schema.attendance.employeeId, req.r.employeeId), eq(schema.attendance.date, req.r.date)))
+        .limit(1),
+      holidaySet(orgId, req.r.date, req.r.date),
+    ]);
+    if (row?.leaveRequestId) return { ok: false, message: `${formatDate(req.r.date)} is covered by approved leave; it can't be overwritten.` };
+    if (hols.has(req.r.date)) return { ok: false, message: `${formatDate(req.r.date)} is a holiday; it can't be overwritten.` };
+    await upsertAttendance(orgId, req.r.employeeId, req.r.date, {
+      status: req.r.requestedStatus,
+      checkIn: req.r.checkIn,
+      checkOut: req.r.checkOut,
+      note: `Regularised: ${req.r.reason}`.slice(0, 200),
+    });
+  }
+  const status = action === "approve" ? "approved" : action === "reject" ? "rejected" : "cancelled";
+  await db
+    .update(schema.attendanceRegularizations)
+    .set({ status, decidedBy: ctx.userId, decidedAt: new Date(), decisionNote: opts.note?.trim().slice(0, 300) || null })
+    .where(and(eq(schema.attendanceRegularizations.id, id), eq(schema.attendanceRegularizations.orgId, orgId), eq(schema.attendanceRegularizations.status, "pending")));
+  await logActivity(ctx, {
+    module: "hrm",
+    entityType: "attendance_regularization",
+    entityId: id,
+    action: status,
+    summary: `${action === "approve" ? "Approved" : action === "reject" ? "Rejected" : "Cancelled"} ${req.name}'s attendance correction for ${formatDate(req.r.date)}`,
+  });
+  return { ok: true };
+}

@@ -92,7 +92,20 @@ Once connected:
 - `past_due` shows a warning but keeps access.
 - A cancelled subscription deactivates the workspace after the period ends.
 
-## Production
-- Set the variables from `.env.example` on your host (Vercel recommended), including `APP_URL=https://saasmodels.tech`.
-- Create a Turso database and set `DATABASE_URL` and `DATABASE_AUTH_TOKEN`, then run `npm run db:push` once against it.
-- `npm run db:studio` opens Drizzle Studio for browsing data.
+## Production (Vercel + Turso)
+1. **Database.** Either install **Turso** from the Vercel Marketplace (Storage → Create → Turso), which adds `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` to the project, or create a database at turso.tech and add `DATABASE_URL` + `DATABASE_AUTH_TOKEN` yourself. Both naming styles work.
+2. **Tables.** Nothing to run by hand: `npm run build` first runs `scripts/migrate.mjs`, which applies the SQL migrations in `drizzle/` to the database on every deploy. To move existing local data instead, see `turso db import`.
+3. In Vercel, import the GitHub repository (framework preset: Next.js). Under **Settings → Environment Variables**, set:
+   - `SESSION_SECRET` (`openssl rand -base64 32`)
+   - `CRON_SECRET` (any random string; Vercel Cron sends it to `/api/cron/recurring-invoices`)
+   - `ADMIN_EMAILS`, `APP_TIMEZONE`, `APP_URL` (your production URL)
+   - `RESEND_API_KEY` and `EMAIL_FROM` for email (invites, password reset, notifications). Verify your sending domain in Resend first.
+   - `ENCRYPTION_KEY` (32+ random characters, set once and never change; encrypts stored webhook URLs and Razorpay keys)
+   - optional: `AI_API_KEY` for Ask AI (a free Google Gemini key from aistudio.google.com works; without it Ask AI uses built-in rules)
+   - optional: `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` and `MICROSOFT_CLIENT_ID`/`MICROSOFT_CLIENT_SECRET` for social sign-in (redirect URIs `<APP_URL>/api/auth/google/callback` and `<APP_URL>/api/auth/microsoft/callback`)
+   - optional: the `STRIPE_*` variables (billing pages work in trial mode without them)
+4. Deploy. `vercel.json` schedules the daily recurring-invoice run at 00:30 UTC. A deployment without a database fails with a clear error, because Vercel can't keep a local SQLite file.
+
+After changing `src/db/schema.ts`, run `npm run db:generate` and commit the new file in `drizzle/`.
+
+`npm run db:studio` opens Drizzle Studio for browsing data.

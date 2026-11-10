@@ -84,6 +84,12 @@ Read this before changing any module. The product spec is in `docs/MODULES.md`; 
 - **Printable pages** use `print:hidden` on chrome. The app sidebar is hidden in print.
 - **CSV export:** link to `/api/export/<entity>` (for example `employees`, `invoices`). It is implemented centrally.
 
+## Schema changes and migrations
+Local development uses `npm run db:push`. Production databases are migrated from the SQL files in `drizzle/`: after any change to `src/db/schema.ts`, run `npm run db:generate` and commit the new migration. `npm run build` runs `scripts/migrate.mjs` first, so each Vercel deploy applies pending migrations to Turso before building.
+
+## Email
+Send mail only through `sendEmail()` in `src/lib/email.ts` (Resend HTTP API). It never throws and returns `{ sent }`, so actions must still succeed and fall back to a copyable link when email is not configured.
+
 ## Seeds
 Each module owns `src/lib/seed/<module>.ts` exporting `seed<Module>(ctx)`. Seeds run in this order: hrm → crm → inventory → finance → projects → payroll → helpdesk. Later seeds read earlier data from the DB. Seeds must use the same posting functions as the UI, so the ledger, stock and totals are consistent.
 

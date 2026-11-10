@@ -63,7 +63,15 @@ export function AuthForm({
           type={show ? "text" : "password"}
           errors={state?.errors?.password}
           autoComplete={isSignup ? "new-password" : "current-password"}
-          hint={isSignup ? <span className="text-xs text-ink-mute">8+ chars, a letter & a number</span> : undefined}
+          hint={
+            isSignup ? (
+              <span className="text-xs text-ink-mute">8+ chars, a letter & a number</span>
+            ) : (
+              <Link href="/forgot-password" className="text-xs font-normal text-ink-soft underline underline-offset-4 hover:text-ink">
+                Forgot password?
+              </Link>
+            )
+          }
         />
         <button
           type="button"
@@ -94,7 +102,7 @@ export function AuthForm({
       <p className="pt-2 text-center text-sm text-ink-soft">
         {isSignup ? "Already have an account? " : "New to saasmodels.tech? "}
         <Link
-          href={isSignup ? (invite ? `/login?next=/invite/${invite.token}` : "/login") : "/signup"}
+          href={isSignup ? (invite ? `/login?next=/invite/${invite.token}&invite=${invite.token}` : "/login") : "/signup"}
           className="font-medium text-ink underline decoration-signal decoration-2 underline-offset-4"
         >
           {isSignup ? "Log in" : "Create an account"}

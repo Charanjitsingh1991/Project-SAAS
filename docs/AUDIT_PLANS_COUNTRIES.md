@@ -15,8 +15,17 @@ Audit date: Nov 2026. "✅" = existed before this round, "➕" = added in this r
 | **Helpdesk** | Freshdesk, Zoho Desk | ✅ SLA timers · internal notes · canned replies · KB · customer portal · CSAT<br>➕ public portal only served when the plan includes it and Helpdesk is on |
 | **Workspace** | — | ➕ **audit log** (Enterprise): filter by module, user, date and text; CSV export |
 
+### Added after the audit
+➕ Employee document vault (uploads up to 4 MB, stored in the database, on the employee profile and in My space) · ➕ asset management (`/app/hrm/assets`, assignment history, warranty insights) · ➕ CSV import for companies, contacts and products · ➕ customer statements (`/app/finance/statements`) · ➕ helpdesk round-robin assignment (Helpdesk → Settings) · ➕ automatic recurring invoices (daily Vercel Cron at `/api/cron/recurring-invoices`).
+
+### Launch round (greytHR / Zoho People parity)
+➕ Transactional email via Resend (invites, welcome, password reset, leave/claim/attendance notifications) · ➕ forgot/reset/change password, with all other sessions revoked on change · ➕ reporting managers approve their direct reports' leave and attendance corrections from My space · ➕ attendance regularisation requests · ➕ bulk employee CSV import and one-click / bulk "Invite to portal" · ➕ company announcements (overview, My space, optional email) · ➕ HR letters (offer, appointment, experience, relieving, salary certificate, NOC) with numbered, printable copies visible to the employee · ➕ India PF ECR 2.0 file, ESIC contribution file, and annual salary & TDS statement (Form 16 Part B style, reference only).
+
+### Integrations and AI
+➕ Ask AI (`/app/ask`): read-only, role-checked tools over workspace data, with an OpenAI-compatible LLM (Gemini by default) or a built-in rules fallback · ➕ signed outgoing webhooks for Zapier, Make, n8n and custom servers, with retries and a delivery log · ➕ Slack, Microsoft Teams and Google Chat channel alerts · ➕ REST API v1 with scoped API keys and an OpenAPI spec · ➕ iCal feeds for Google, Outlook and Apple Calendar · ➕ Razorpay payment links on invoices, recorded automatically via signed webhook, shareable by email or WhatsApp · ➕ Sign in with Google and Microsoft.
+
 ### Not built yet
-Employee document vault (file uploads) · asset management · CSV import for contacts/companies/products · customer statements · helpdesk round-robin assignment · Abu Dhabi (ADPF) and GCC-national pension schemes · automatic recurring-invoice scheduling (runs on "Run due now").
+Abu Dhabi (ADPF) and GCC-national pension schemes · shifts and rosters, biometric device sync · investment declarations and the India old tax regime · official Form 16 (issued via TRACES) · surveys · native mobile apps · multi-currency, manufacturing, consolidation, e-invoicing (IRN/e-way bill).
 
 ## 2. Module choice and plans
 

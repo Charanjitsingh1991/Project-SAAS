@@ -3,6 +3,7 @@ import { and, eq, gt, isNull } from "drizzle-orm";
 import { Suspense } from "react";
 import { AuthForm } from "@/components/auth-form";
 import { AuthShell } from "@/components/auth-shell";
+import { OAuthButtons } from "@/components/oauth-buttons";
 import { db, schema } from "@/db";
 
 export const metadata: Metadata = { title: "Create account" };
@@ -16,15 +17,28 @@ async function SignupForm({ searchParams }: { searchParams: PageProps<"/signup">
       .innerJoin(schema.organizations, eq(schema.invites.orgId, schema.organizations.id))
       .where(and(eq(schema.invites.token, token), isNull(schema.invites.acceptedAt), gt(schema.invites.expiresAt, new Date())))
       .limit(1);
-    if (row) return <AuthForm mode="signup" invite={{ token, email: row.email, orgName: row.orgName }} />;
+    if (row) {
+      return (
+        <>
+          <OAuthButtons invite={token} verb="Sign up" />
+          <AuthForm mode="signup" invite={{ token, email: row.email, orgName: row.orgName }} />
+        </>
+      );
+    }
     return (
       <>
         <p className="mb-6 rounded-xl bg-signal/10 px-4 py-3 text-sm text-signal">This invite link has expired or was already used. You can still create your own workspace below.</p>
+        <OAuthButtons verb="Sign up" />
         <AuthForm mode="signup" />
       </>
     );
   }
-  return <AuthForm mode="signup" />;
+  return (
+    <>
+      <OAuthButtons verb="Sign up" />
+      <AuthForm mode="signup" />
+    </>
+  );
 }
 
 export default function SignupPage(props: PageProps<"/signup">) {

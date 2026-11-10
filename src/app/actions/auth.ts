@@ -8,7 +8,9 @@ import { z } from "zod";
 import { db, schema } from "@/db";
 import { LoginSchema, SignupSchema, type FormState } from "@/lib/definitions";
 import { COUNTRIES, countryFromPhone, isValidPhone, normalizePhone } from "@/lib/countries";
+import { sendEmail } from "@/lib/email";
 import { createOrganization } from "@/lib/org";
+import { appOrigin } from "@/lib/url";
 import { createSession, deleteSession } from "@/lib/session";
 import { syncSeats } from "@/lib/stripe";
 import { ORG_COOKIE } from "@/lib/tenancy";
@@ -85,6 +87,15 @@ export async function signup(_: FormState, formData: FormData): Promise<FormStat
     await syncSeats(orgId);
   } else {
     orgId = await createOrganization(user.id, company || `${name.split(" ")[0]}'s workspace`, { country, phone });
+  }
+
+  if (!invite) {
+    await sendEmail({
+      to: email,
+      subject: "Welcome to saasmodels.tech",
+      paragraphs: [`Hi ${name.split(" ")[0]},`, "Your workspace is ready and your 14-day trial has started. Set up your company and invite your team whenever you're ready."],
+      action: { label: "Open your workspace", url: `${await appOrigin()}/app` },
+    });
   }
 
   await createSession(user.id);
