@@ -118,11 +118,35 @@ export const STATUS_TONE: Record<string, Tone> = {
   urgent: "rose",
   new: "butter",
   contacted: "sky",
-  closed: "mint",
+  closed: "card",
+  notice: "butter",
+  exited: "card",
+  probation: "lilac",
+  negotiation: "peach",
+  partial: "butter",
+  unpaid: "peach",
+  ordered: "sky",
+  received: "mint",
+  cancelled: "card",
+  backlog: "card",
+  in_progress: "sky",
+  review: "lilac",
+  absent: "rose",
+  present: "mint",
+  half_day: "butter",
+  leave: "sky",
+  holiday: "lilac",
+  wfh: "lime",
+  customer: "mint",
+  prospect: "sky",
+  churned: "rose",
+  breached: "rose",
+  at_risk: "butter",
+  on_track: "mint",
 };
 
 export function StatusBadge({ value }: { value: string }) {
-  return <Badge tone={STATUS_TONE[value] ?? "card"}>{value.replace("_", " ")}</Badge>;
+  return <Badge tone={STATUS_TONE[value] ?? "card"}>{value.replaceAll("_", " ")}</Badge>;
 }
 
 export function EmptyState({ title, children }: { title: string; children?: React.ReactNode }) {

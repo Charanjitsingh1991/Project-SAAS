@@ -1,91 +1,102 @@
 import type { Metadata } from "next";
-import { desc, eq } from "drizzle-orm";
-import { ActionForm, Input, StatusSelect, SubmitButton } from "@/components/app/forms";
+import Link from "next/link";
 import { Card, EmptyState, PageHeader, Stat, StatusBadge, Table, Td, Th } from "@/components/app/ui";
-import { db, schema } from "@/db";
-import { formatDate, formatMoney, todayYmd } from "@/lib/format";
+import { dashboard } from "@/lib/finance";
+import { AGING_BUCKETS, AGING_LABEL, invoiceDisplayStatus, type AgingBucket } from "@/lib/finance-utils";
+import { daysBetween, formatDate, formatMoney, formatMoneyCompact, todayYmd } from "@/lib/format";
 import { requireWorkspace } from "@/lib/tenancy";
-import { createInvoice, setInvoiceStatus } from "./actions";
 import { FINANCE_TABS } from "./tabs";
 
-export const metadata: Metadata = { title: "Invoices" };
+export const metadata: Metadata = { title: "Finance" };
 
-function addDays(ymd: string, n: number) {
-  return new Date(Date.parse(ymd) + n * 86_400_000).toISOString().slice(0, 10);
-}
+const BUCKET_COLOR: Record<AgingBucket, string> = {
+  current: "bg-mint",
+  "1-30": "bg-butter",
+  "31-60": "bg-peach",
+  "61-90": "bg-rose",
+  "90+": "bg-signal",
+};
 
-export default async function InvoicesPage() {
+export default async function FinancePage() {
   const ws = await requireWorkspace({ module: "finance" });
   const cur = ws.org.currency;
   const today = todayYmd();
-
-  const rows = await db
-    .select()
-    .from(schema.invoices)
-    .where(eq(schema.invoices.orgId, ws.org.id))
-    .orderBy(desc(schema.invoices.issueDate), desc(schema.invoices.id));
-
-  const isOverdue = (i: (typeof rows)[number]) => i.status === "sent" && i.dueDate < today;
-  const sum = (list: typeof rows) => list.reduce((s, i) => s + i.amount, 0);
-  const sent = rows.filter((i) => i.status === "sent");
-  const overdue = rows.filter(isOverdue);
-  const paid = rows.filter((i) => i.status === "paid");
-  const drafts = rows.filter((i) => i.status === "draft");
-
-  const maxSuffix = rows.reduce((m, i) => {
-    const match = /(\d+)\s*$/.exec(i.number);
-    return match ? Math.max(m, Number(match[1])) : m;
-  }, 1000);
-  const nextNumber = `INV-${maxSuffix + 1}`;
+  const d = await dashboard(ws.org.id, today);
+  const { ar } = d;
 
   return (
     <>
-      <PageHeader title="Finance" description="Create invoices and track what's been paid." tabs={FINANCE_TABS("invoices")} />
+      <PageHeader
+        title="Finance"
+        description="Invoices, bills and a live double-entry ledger — every number below comes straight from the books."
+        tabs={FINANCE_TABS("overview")}
+        actions={
+          <Link href="/app/finance/invoices/new" className="inline-flex h-10 items-center rounded-full bg-ink px-5 text-sm font-medium text-paper hover:bg-ink/85">
+            New invoice
+          </Link>
+        }
+      />
 
-      <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Stat label="Outstanding" value={formatMoney(sum(sent), cur)} hint={`${sent.length} sent`} tone="butter" />
-        <Stat label="Overdue" value={formatMoney(sum(overdue), cur)} hint={`${overdue.length} invoice${overdue.length === 1 ? "" : "s"}`} tone="rose" />
-        <Stat label="Collected" value={formatMoney(sum(paid), cur)} hint={`${paid.length} paid`} tone="mint" />
-        <Stat label="Drafts" value={drafts.length} tone="sky" />
+      <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <Stat label="Receivables outstanding" value={formatMoneyCompact(ar.total, cur)} hint={`${ar.invoices.length} open invoice${ar.invoices.length === 1 ? "" : "s"}`} tone="sky" />
+        <Stat label="Overdue" value={formatMoneyCompact(ar.overdueAmount, cur)} hint={`${ar.overdueCount} invoice${ar.overdueCount === 1 ? "" : "s"} past due`} tone={ar.overdueCount ? "rose" : "mint"} />
+        <Stat label="Collected this month" value={formatMoneyCompact(d.collectedThisMonth, cur)} tone="mint" />
+        <Stat label={`Net profit · FY ${d.fiscal[0].slice(0, 4)}–${d.fiscal[1].slice(2, 4)}`} value={formatMoneyCompact(d.netProfit, cur)} hint="Income − expenses from the ledger" tone="lilac" />
+        <Stat label="GST payable (net)" value={formatMoneyCompact(d.gstNet, cur)} hint={d.gstNet < 0 ? "Input credit exceeds output" : "Output − input credit"} tone="butter" />
+        <Stat label="Cash balance" value={formatMoneyCompact(d.cash, cur)} hint="Bank & cash account" tone="lime" />
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[1fr_340px]">
-        <Card title={`Invoices (${rows.length})`}>
-          {rows.length === 0 ? (
+      <Card title="Receivables aging" className="mb-6">
+        {ar.total === 0 ? (
+          <EmptyState title="Nothing outstanding">Sent invoices with a balance will show up here.</EmptyState>
+        ) : (
+          <>
+            <div className="flex h-4 overflow-hidden rounded-full bg-ink/5" role="img" aria-label="Receivables aging">
+              {AGING_BUCKETS.map((b) => (
+                <div key={b} className={BUCKET_COLOR[b]} style={{ width: `${(ar.totals[b] / ar.total) * 100}%` }} title={`${AGING_LABEL[b]}: ${formatMoney(ar.totals[b], cur)}`} />
+              ))}
+            </div>
+            <dl className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-5">
+              {AGING_BUCKETS.map((b) => (
+                <div key={b}>
+                  <dt className="flex items-center gap-1.5 font-mono text-[11px] tracking-widest text-ink-mute uppercase">
+                    <span className={`size-2 rounded-full ${BUCKET_COLOR[b]}`} />
+                    {AGING_LABEL[b]}
+                  </dt>
+                  <dd className="mt-1 font-display text-lg font-semibold tabular-nums">{formatMoney(ar.totals[b], cur)}</dd>
+                </div>
+              ))}
+            </dl>
+          </>
+        )}
+      </Card>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Card title="Recent invoices" actions={<Link href="/app/finance/invoices" className="text-sm text-ink-soft hover:text-ink">View all</Link>}>
+          {d.recent.length === 0 ? (
             <EmptyState title="No invoices yet" />
           ) : (
             <Table>
               <thead>
                 <tr>
-                  <Th>Number</Th>
+                  <Th>Invoice</Th>
                   <Th>Customer</Th>
-                  <Th>Issued</Th>
-                  <Th>Due</Th>
-                  <Th className="text-right">Amount</Th>
+                  <Th className="text-right">Total</Th>
                   <Th>Status</Th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map((i) => (
+                {d.recent.map((i) => (
                   <tr key={i.id}>
-                    <Td className="font-mono text-xs">{i.number}</Td>
                     <Td>
-                      <p className="font-medium">{i.customerName}</p>
-                      {i.customerEmail && <p className="text-xs text-ink-mute">{i.customerEmail}</p>}
+                      <Link href={`/app/finance/invoices/${i.id}`} className="font-medium hover:underline">
+                        {i.number}
+                      </Link>
                     </Td>
-                    <Td className="text-ink-soft">{formatDate(i.issueDate)}</Td>
-                    <Td className="text-ink-soft">
-                      <div className="flex items-center gap-2">
-                        {formatDate(i.dueDate)}
-                        {isOverdue(i) && <StatusBadge value="overdue" />}
-                      </div>
-                    </Td>
-                    <Td className="text-right font-medium tabular-nums">{formatMoney(i.amount, cur)}</Td>
+                    <Td>{i.customerName}</Td>
+                    <Td className="text-right tabular-nums">{formatMoney(i.total, cur)}</Td>
                     <Td>
-                      <div className="flex items-center gap-2">
-                        <StatusBadge value={i.status} />
-                        <StatusSelect action={setInvoiceStatus} id={i.id} value={i.status} options={["draft", "sent", "paid", "void"]} />
-                      </div>
+                      <StatusBadge value={invoiceDisplayStatus(i, today)} />
                     </Td>
                   </tr>
                 ))}
@@ -94,18 +105,42 @@ export default async function InvoicesPage() {
           )}
         </Card>
 
-        <Card title="New invoice" className="h-fit">
-          <ActionForm action={createInvoice} className="space-y-3">
-            <Input key={nextNumber} label="Invoice number" name="number" defaultValue={nextNumber} />
-            <Input label="Customer name" name="customerName" />
-            <Input label="Customer email (optional)" name="customerEmail" type="email" />
-            <Input label={`Amount (${cur})`} name="amount" type="number" min={1} step={1} />
-            <div className="grid grid-cols-2 gap-3">
-              <Input label="Issue date" name="issueDate" type="date" defaultValue={today} />
-              <Input label="Due date" name="dueDate" type="date" defaultValue={addDays(today, 15)} />
-            </div>
-            <SubmitButton className="w-full">Create invoice</SubmitButton>
-          </ActionForm>
+        <Card title="Unpaid bills" actions={<Link href="/app/finance/expenses?status=unpaid" className="text-sm text-ink-soft hover:text-ink">View all</Link>}>
+          {d.bills.length === 0 ? (
+            <EmptyState title="No unpaid bills" />
+          ) : (
+            <Table>
+              <thead>
+                <tr>
+                  <Th>Bill</Th>
+                  <Th>Due</Th>
+                  <Th className="text-right">Amount</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {d.bills.map(({ e, vendor }) => {
+                  const days = e.dueDate ? daysBetween(today, e.dueDate) : null;
+                  return (
+                    <tr key={e.id}>
+                      <Td>
+                        <span className="font-medium">{e.description}</span>
+                        {vendor && <span className="block text-xs text-ink-mute">{vendor}</span>}
+                      </Td>
+                      <Td>
+                        {e.dueDate ? formatDate(e.dueDate) : "—"}
+                        {days !== null && (
+                          <span className={`block text-xs ${days < 0 ? "text-signal" : "text-ink-mute"}`}>
+                            {days < 0 ? `${-days}d overdue` : days === 0 ? "due today" : `in ${days}d`}
+                          </span>
+                        )}
+                      </Td>
+                      <Td className="text-right tabular-nums">{formatMoney(e.total, cur)}</Td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </Table>
+          )}
         </Card>
       </div>
     </>
