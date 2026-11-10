@@ -7,6 +7,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { db, schema } from "@/db";
 import { LoginSchema, SignupSchema, type FormState } from "@/lib/definitions";
+import { COUNTRIES, countryFromPhone, isValidPhone, normalizePhone } from "@/lib/countries";
 import { createOrganization } from "@/lib/org";
 import { createSession, deleteSession } from "@/lib/session";
 import { syncSeats } from "@/lib/stripe";
@@ -36,16 +37,25 @@ export async function signup(_: FormState, formData: FormData): Promise<FormStat
     name: String(formData.get("name") ?? ""),
     email: String(formData.get("email") ?? ""),
     company: String(formData.get("company") ?? "") || undefined,
+    country: String(formData.get("country") ?? "IN"),
+    phone: String(formData.get("phone") ?? "") || undefined,
     password: String(formData.get("password") ?? ""),
   };
   const inviteToken = String(formData.get("invite") ?? "");
   const parsed = SignupSchema.safeParse(raw);
-  const values = { name: raw.name, email: raw.email, company: raw.company ?? "" };
+  const values = { name: raw.name, email: raw.email, company: raw.company ?? "", country: raw.country, phone: raw.phone ?? "" };
   if (!parsed.success) {
     return { errors: z.flattenError(parsed.error).fieldErrors, values };
   }
 
   const { name, email, company, password } = parsed.data;
+  // Phone: optional for invited users; when given it must match the country (and +971/+91 auto-picks the country).
+  const phone = parsed.data.phone ? normalizePhone(parsed.data.phone) : null;
+  const country = (phone && countryFromPhone(phone)) || parsed.data.country;
+  if (phone && !isValidPhone(phone, country)) {
+    return { errors: { phone: [`Enter a valid ${COUNTRIES[country].name} mobile number, e.g. ${COUNTRIES[country].phone.example}.`] }, values };
+  }
+  if (!inviteToken && !phone) return { errors: { phone: ["Enter your mobile number."] }, values };
   const invite = inviteToken ? await openInvite(inviteToken) : null;
   if (inviteToken && !invite) return { message: "This invite link has expired or was already used.", values };
   if (invite && invite.email.toLowerCase() !== email) {
@@ -64,7 +74,7 @@ export async function signup(_: FormState, formData: FormData): Promise<FormStat
   const passwordHash = await bcrypt.hash(password, 12);
   const [user] = await db
     .insert(schema.users)
-    .values({ name, email, company, passwordHash })
+    .values({ name, email, company, phone, passwordHash })
     .returning({ id: schema.users.id });
 
   let orgId: number;
@@ -74,7 +84,7 @@ export async function signup(_: FormState, formData: FormData): Promise<FormStat
     orgId = invite.orgId;
     await syncSeats(orgId);
   } else {
-    orgId = await createOrganization(user.id, company || `${name.split(" ")[0]}'s workspace`);
+    orgId = await createOrganization(user.id, company || `${name.split(" ")[0]}'s workspace`, { country, phone });
   }
 
   await createSession(user.id);

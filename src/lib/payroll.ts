@@ -1,4 +1,5 @@
 /** Pure payroll calculation engine (India, new tax regime FY2025-26). All amounts in minor units (paise). */
+import { REIMBURSEMENT_CODE, type PayslipBreakdown } from "./payroll-types";
 
 const RUPEE = 100;
 export const PF_WAGE_CAP = 15_000 * RUPEE;
@@ -145,4 +146,58 @@ export function lopAndPaidDays(args: {
   }
   lop = Math.min(lop, employed);
   return { paidDays: employed - lop, lopDays: lop, daysInMonth };
+}
+
+/** India result with the shared breakdown (claims and loan recoveries are outside gross/TDS). */
+export function computeIndiaPayslip(i: PayrollInput & { reimbursements?: number; loanDeduction?: number }) {
+  const b = computePayroll(i);
+  const reimbursements = i.reimbursements ?? 0;
+  const loanDeduction = i.loanDeduction ?? 0;
+  const breakdown: PayslipBreakdown = {
+    earnings: [
+      { code: "basic", label: "Basic", amount: b.basic },
+      { code: "hra", label: "HRA", amount: b.hra },
+      { code: "special", label: "Special allowance", amount: b.special },
+      { code: "bonus", label: "Bonus", amount: b.bonus },
+      { code: "other_earnings", label: "Other earnings", amount: b.otherEarnings },
+      { code: REIMBURSEMENT_CODE, label: "Expense reimbursements", amount: reimbursements },
+    ].filter((l) => l.amount),
+    deductions: [
+      { code: "pf", label: "Provident fund (12%)", amount: b.pfEmployee, account: "pf_payable" },
+      { code: "esi", label: "ESI (0.75%)", amount: b.esiEmployee, account: "pf_payable" },
+      { code: "pt", label: "Professional tax", amount: b.professionalTax, account: "pt_payable" },
+      { code: "tds", label: "Income tax (TDS)", amount: b.tds, account: "tds_payable" },
+      { code: "loan", label: "Loan / advance recovery", amount: loanDeduction, account: "advances" },
+      { code: "other", label: "Other deductions", amount: b.otherDeductions, account: "other_income" },
+    ].filter((l) => l.amount),
+    employer: [
+      { code: "pf_employer", label: "Employer PF (12%)", amount: b.pfEmployer, expenseAccount: "employer_contrib", liabilityAccount: "pf_payable" },
+      { code: "esi_employer", label: "Employer ESI (3.25%)", amount: b.esiEmployer, expenseAccount: "employer_contrib", liabilityAccount: "pf_payable" },
+    ].filter((l) => l.amount),
+    notes: ["TDS estimated under the new tax regime (FY 2025-26) on annualised gross."],
+  };
+  return {
+    ...b,
+    breakdown,
+    reimbursements,
+    loanDeduction,
+    totalDeductions: b.totalDeductions + loanDeduction,
+    net: b.net - loanDeduction + reimbursements,
+  };
+}
+
+export const GRATUITY_CAP_IN = 20_00_000 * RUPEE;
+
+/**
+ * Payment of Gratuity Act: 15/26 × last monthly basic × completed years (a final part-year over 6 months counts as a year),
+ * payable after 5 years of continuous service, capped at ₹20 lakh.
+ */
+export function indiaGratuity(basicMonthly: number, serviceDays: number) {
+  const fullYears = Math.floor(serviceDays / 365);
+  const remainderDays = serviceDays - fullYears * 365;
+  const years = fullYears + (remainderDays > 182 ? 1 : 0);
+  if (fullYears < 5 || basicMonthly <= 0) return { amount: 0, note: "No gratuity: less than 5 years of continuous service." };
+  const raw = Math.round((basicMonthly * 15 * years) / 26);
+  const amount = Math.min(raw, GRATUITY_CAP_IN);
+  return { amount, note: `15/26 × basic × ${years} years${raw > amount ? " (capped at ₹20 lakh)" : ""}.` };
 }

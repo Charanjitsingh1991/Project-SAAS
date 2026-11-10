@@ -6,10 +6,28 @@ import { ActionButton, ActionForm, Input, SubmitButton } from "@/components/app/
 import { Card, EmptyState, PageHeader, Stat, StatusBadge, Table, Td, Th } from "@/components/app/ui";
 import { db, schema } from "@/db";
 import { formatDate, formatMoney, formatPeriod, fromMinor, todayYmd } from "@/lib/format";
-import { requireWorkspace } from "@/lib/tenancy";
+import { parseBreakdown, sumLines, type PayslipBreakdown } from "@/lib/payroll-types";
+import { legacyBreakdown } from "@/lib/posting";
+import { packFor, requireWorkspace } from "@/lib/tenancy";
 import { adjustSlip, approveRun, deleteRun, markPaid, recalcRun } from "../actions";
 
 export const metadata: Metadata = { title: "Payroll run" };
+
+const SHORT: Record<string, string> = { pf: "PF", esi: "ESI", pt: "PT", tds: "TDS", pension: "GPSSA", loan: "Loan", other: "Other" };
+
+/** [head, employee deduction codes, employer line codes] */
+const STATUTORY: Record<"IN" | "AE", [string, string[], string[]][]> = {
+  IN: [
+    ["Provident Fund (PF)", ["pf"], ["pf_employer"]],
+    ["Employees' State Insurance (ESI)", ["esi"], ["esi_employer"]],
+    ["Professional Tax (PT)", ["pt"], []],
+    ["Income tax (TDS, s.192)", ["tds"], []],
+  ],
+  AE: [
+    ["GPSSA pension (UAE nationals)", ["pension"], ["pension_employer"]],
+    ["End-of-service gratuity provision", [], ["gratuity"]],
+  ],
+};
 
 const TABS = [
   { key: "payslips", label: "Payslips" },
@@ -35,20 +53,38 @@ export default async function RunPage(props: PageProps<"/app/payroll/[runId]">) 
   if (!run) notFound();
 
   const slips = await db
-    .select({ p: schema.payslips, bankAccount: schema.employees.bankAccount, ifsc: schema.employees.ifsc })
+    .select({
+      p: schema.payslips,
+      bankAccount: schema.employees.bankAccount,
+      ifsc: schema.employees.ifsc,
+      iban: schema.employees.iban,
+      routing: schema.employees.bankRoutingCode,
+      personId: schema.employees.wpsPersonId,
+    })
     .from(schema.payslips)
     .leftJoin(schema.employees, eq(schema.payslips.employeeId, schema.employees.id))
     .where(and(eq(schema.payslips.runId, id), eq(schema.payslips.orgId, ws.org.id)))
     .orderBy(asc(schema.payslips.employeeCode));
 
-  const sum = (f: (p: (typeof slips)[number]["p"]) => number) => slips.reduce((s, x) => s + f(x.p), 0);
   const draft = run.status === "draft";
-  const pfE = sum((p) => p.pfEmployee);
-  const pfR = sum((p) => p.pfEmployer);
-  const esiE = sum((p) => p.esiEmployee);
-  const esiR = sum((p) => p.esiEmployer);
-  const pt = sum((p) => p.professionalTax);
-  const tds = sum((p) => p.tds);
+  const pack = packFor(ws);
+  const uae = pack.code === "AE";
+  const bds = new Map<number, PayslipBreakdown>(slips.map((x) => [x.p.id, parseBreakdown(x.p.breakdown) ?? legacyBreakdown(x.p)]));
+  const dedCodes = [...new Set(slips.flatMap((x) => bds.get(x.p.id)!.deductions.filter((d) => d.amount).map((d) => d.code)))];
+  const statutory = STATUTORY[uae ? "AE" : "IN"].map(([label, emp, er]) => {
+    let e = 0;
+    let r = 0;
+    let n = 0;
+    for (const x of slips) {
+      const b = bds.get(x.p.id)!;
+      const se = sumLines(b.deductions.filter((d) => emp.includes(d.code)));
+      const sr = sumLines(b.employer.filter((l) => er.includes(l.code)));
+      e += se;
+      r += sr;
+      if (se + sr > 0) n++;
+    }
+    return { label, e, r, n };
+  });
 
   return (
     <>
@@ -105,7 +141,7 @@ export default async function RunPage(props: PageProps<"/app/payroll/[runId]">) 
         <Stat label="Gross" value={money(run.totalGross)} hint={`${run.employeeCount} employees`} tone="mint" />
         <Stat label="Deductions" value={money(run.totalDeductions)} tone="peach" />
         <Stat label="Net pay" value={money(run.totalNet)} tone="sky" />
-        <Stat label="Employer cost" value={money(run.totalEmployerCost)} hint="Gross + employer PF & ESI" tone="butter" />
+        <Stat label="Employer cost" value={money(run.totalEmployerCost)} hint={uae ? "Gross + employer GPSSA + gratuity accrual" : "Gross + employer PF & ESI"} tone="butter" />
       </div>
 
       {tab === "payslips" && (
@@ -120,18 +156,18 @@ export default async function RunPage(props: PageProps<"/app/payroll/[runId]">) 
                   <Th className="text-right">Paid days</Th>
                   <Th className="text-right">LOP</Th>
                   <Th className="text-right">Gross</Th>
-                  <Th className="text-right">PF</Th>
-                  <Th className="text-right">ESI</Th>
-                  <Th className="text-right">PT</Th>
-                  <Th className="text-right">TDS</Th>
-                  <Th className="text-right">Other</Th>
+                  {dedCodes.map((c) => (
+                    <Th key={c} className="text-right">
+                      {SHORT[c] ?? c}
+                    </Th>
+                  ))}
                   <Th className="text-right">Net</Th>
                   <Th />
                 </tr>
               </thead>
               <tbody>
                 {slips.map(({ p }) => (
-                  <PayslipRows key={p.id} p={p} draft={draft} cur={cur} />
+                  <PayslipRows key={p.id} p={p} b={bds.get(p.id)!} codes={dedCodes} draft={draft} cur={cur} />
                 ))}
               </tbody>
             </Table>
@@ -152,18 +188,13 @@ export default async function RunPage(props: PageProps<"/app/payroll/[runId]">) 
               </tr>
             </thead>
             <tbody>
-              {[
-                ["Provident Fund (PF)", pfE, pfR, slips.filter((x) => x.p.pfEmployee > 0).length],
-                ["Employees' State Insurance (ESI)", esiE, esiR, slips.filter((x) => x.p.esiEmployee > 0).length],
-                ["Professional Tax (PT)", pt, 0, slips.filter((x) => x.p.professionalTax > 0).length],
-                ["Income tax (TDS, s.192)", tds, 0, slips.filter((x) => x.p.tds > 0).length],
-              ].map(([label, e, r, n]) => (
-                <tr key={label as string}>
+              {statutory.map(({ label, e, r, n }) => (
+                <tr key={label}>
                   <Td className="font-medium">{label}</Td>
-                  <Td className="text-right tabular-nums">{money(e as number)}</Td>
-                  <Td className="text-right tabular-nums">{money(r as number)}</Td>
-                  <Td className="text-right font-medium tabular-nums">{money((e as number) + (r as number))}</Td>
-                  <Td className="text-right tabular-nums">{n as number}</Td>
+                  <Td className="text-right tabular-nums">{money(e)}</Td>
+                  <Td className="text-right tabular-nums">{money(r)}</Td>
+                  <Td className="text-right font-medium tabular-nums">{money(e + r)}</Td>
+                  <Td className="text-right tabular-nums">{n}</Td>
                 </tr>
               ))}
             </tbody>
@@ -176,35 +207,55 @@ export default async function RunPage(props: PageProps<"/app/payroll/[runId]">) 
           title="Bank transfer"
           className="mb-6"
           actions={
-            <a href={`/api/export/payslips?run=${run.id}`} className="text-sm font-medium underline-offset-4 hover:underline">
-              Download CSV
-            </a>
+            <span className="flex gap-4">
+              {uae && !draft && (
+                <a href={`/api/payroll/${run.id}/sif`} className="text-sm font-medium underline-offset-4 hover:underline">
+                  Download WPS SIF
+                </a>
+              )}
+              <a href={`/api/export/payslips?run=${run.id}`} className="text-sm font-medium underline-offset-4 hover:underline">
+                Download CSV
+              </a>
+            </span>
           }
         >
+          {uae && draft && <p className="mb-3 text-sm text-ink-soft">Approve the run to generate the WPS salary information file (SIF).</p>}
           <Table>
             <thead>
               <tr>
                 <Th>Employee</Th>
-                <Th>Account</Th>
-                <Th>IFSC</Th>
+                {uae ? (
+                  <>
+                    <Th>IBAN</Th>
+                    <Th>Routing code</Th>
+                    <Th>MOHRE person ID</Th>
+                  </>
+                ) : (
+                  <>
+                    <Th>Account</Th>
+                    <Th>IFSC</Th>
+                  </>
+                )}
                 <Th className="text-right">Net pay</Th>
               </tr>
             </thead>
             <tbody>
-              {slips.map(({ p, bankAccount, ifsc }) => (
+              {slips.map(({ p, bankAccount, ifsc, iban, routing, personId }) => (
                 <tr key={p.id}>
                   <Td className="font-medium">
                     {p.employeeName} <span className="font-mono text-xs text-ink-mute">{p.employeeCode}</span>
                   </Td>
-                  <Td className="font-mono text-xs">{bankAccount ?? <span className="text-signal">Missing</span>}</Td>
-                  <Td className="font-mono text-xs">{ifsc ?? <span className="text-signal">Missing</span>}</Td>
+                  {(uae ? [iban, routing, personId] : [bankAccount, ifsc]).map((v, i) => (
+                    <Td key={i} className="font-mono text-xs">
+                      {v ?? <span className="text-signal">Missing</span>}
+                    </Td>
+                  ))}
                   <Td className="text-right font-medium tabular-nums">{money(p.net)}</Td>
                 </tr>
               ))}
               <tr>
                 <Td className="font-semibold">Total</Td>
-                <Td />
-                <Td />
+                <td colSpan={uae ? 3 : 2} className="border-b border-line/70" />
                 <Td className="text-right font-semibold tabular-nums">{money(run.totalNet)}</Td>
               </tr>
             </tbody>
@@ -214,20 +265,33 @@ export default async function RunPage(props: PageProps<"/app/payroll/[runId]">) 
 
       <Card title="How this is calculated">
         <ul className="grid gap-2 text-sm text-ink-soft md:grid-cols-2">
-          <li><b className="text-ink">Earnings:</b> Basic = 50% of CTC/12; HRA = 40% of Basic (50% in metros); Special = the remainder. All pro-rated by paid days ÷ {run.daysInMonth} days.</li>
-          <li><b className="text-ink">LOP:</b> absent days + unpaid leave + ½ per half-day. Days before joining or after exit are unpaid but not LOP.</li>
-          <li><b className="text-ink">PF:</b> 12% of Basic capped at a ₹15,000 wage (max ₹1,800), employee and employer, if enrolled.</li>
-          <li><b className="text-ink">ESI:</b> if gross ≤ ₹21,000: 0.75% employee, 3.25% employer of gross.</li>
-          <li><b className="text-ink">Professional tax:</b> ₹200 when gross exceeds ₹15,000.</li>
-          <li><b className="text-ink">TDS (new regime FY2025-26):</b> (gross × 12 − ₹75,000) taxed at 0/5/10/15/20/25/30% slabs from ₹4L; nil if taxable ≤ ₹12L (s.87A); +4% cess; ÷ 12.</li>
-          <li><b className="text-ink">Net</b> = gross − PF − ESI − PT − TDS − other deductions. <b className="text-ink">Employer cost</b> = gross + employer PF + employer ESI.</li>
+          {uae ? (
+            <>
+              <li><b className="text-ink">Earnings:</b> basic, housing, transport and other allowances from the employee&apos;s salary components (default 60/25/10/5% of the package), pro-rated by paid days ÷ {run.daysInMonth} days.</li>
+              <li><b className="text-ink">LOP:</b> absent days + unpaid leave + ½ per half-day or half-pay leave day.</li>
+              <li><b className="text-ink">Income tax:</b> none — the UAE has no personal income tax.</li>
+              <li><b className="text-ink">GPSSA (UAE nationals only):</b> 11% employee; employer 12.5% (15% at AED 20,000+) of the full contract salary, bounded AED 3,000–70,000. Abu Dhabi (ADPF) and GCC-national schemes aren&apos;t modelled.</li>
+              <li><b className="text-ink">Gratuity accrual (expats):</b> basic ÷ 30 × 21 days per year (30 days after 5 years) ÷ 12, posted to the gratuity provision.</li>
+              <li><b className="text-ink">Net</b> = gross + approved claims − GPSSA − loan recovery − other deductions. Paid through WPS using the SIF file.</li>
+            </>
+          ) : (
+            <>
+              <li><b className="text-ink">Earnings:</b> Basic = 50% of CTC/12; HRA = 40% of Basic (50% in metros); Special = the remainder. All pro-rated by paid days ÷ {run.daysInMonth} days.</li>
+              <li><b className="text-ink">LOP:</b> absent days + unpaid leave + ½ per half-day. Days before joining or after exit are unpaid but not LOP.</li>
+              <li><b className="text-ink">PF:</b> 12% of Basic capped at a ₹15,000 wage (max ₹1,800), employee and employer, if enrolled.</li>
+              <li><b className="text-ink">ESI:</b> if gross ≤ ₹21,000: 0.75% employee, 3.25% employer of gross.</li>
+              <li><b className="text-ink">Professional tax:</b> ₹200 when gross exceeds ₹15,000.</li>
+              <li><b className="text-ink">TDS (new regime FY2025-26):</b> (gross × 12 − ₹75,000) taxed at 0/5/10/15/20/25/30% slabs from ₹4L; nil if taxable ≤ ₹12L (s.87A); +4% cess; ÷ 12.</li>
+              <li><b className="text-ink">Net</b> = gross + approved claims − PF − ESI − PT − TDS − loan recovery − other deductions. <b className="text-ink">Employer cost</b> = gross + employer PF + employer ESI.</li>
+            </>
+          )}
         </ul>
       </Card>
     </>
   );
 }
 
-function PayslipRows({ p, draft, cur }: { p: typeof schema.payslips.$inferSelect; draft: boolean; cur: string }) {
+function PayslipRows({ p, b, codes, draft, cur }: { p: typeof schema.payslips.$inferSelect; b: PayslipBreakdown; codes: string[]; draft: boolean; cur: string }) {
   const m = (n: number) => formatMoney(n, cur);
   return (
     <>
@@ -242,11 +306,11 @@ function PayslipRows({ p, draft, cur }: { p: typeof schema.payslips.$inferSelect
         <Td className="text-right tabular-nums">{p.paidDays}</Td>
         <Td className="text-right tabular-nums">{p.lopDays}</Td>
         <Td className="text-right tabular-nums">{m(p.gross)}</Td>
-        <Td className="text-right tabular-nums">{m(p.pfEmployee)}</Td>
-        <Td className="text-right tabular-nums">{m(p.esiEmployee)}</Td>
-        <Td className="text-right tabular-nums">{m(p.professionalTax)}</Td>
-        <Td className="text-right tabular-nums">{m(p.tds)}</Td>
-        <Td className="text-right tabular-nums">{m(p.otherDeductions)}</Td>
+        {codes.map((c) => (
+          <Td key={c} className="text-right tabular-nums">
+            {m(sumLines(b.deductions.filter((d) => d.code === c)))}
+          </Td>
+        ))}
         <Td className="text-right font-medium tabular-nums">{m(p.net)}</Td>
         <Td className="text-right">
           <Link href={`/app/payroll/payslips/${p.id}`} className="text-sm font-medium underline-offset-4 hover:underline">
@@ -256,7 +320,7 @@ function PayslipRows({ p, draft, cur }: { p: typeof schema.payslips.$inferSelect
       </tr>
       {draft && (
         <tr>
-          <td colSpan={11} className="border-b border-line/70 px-5 py-2">
+          <td colSpan={codes.length + 6} className="border-b border-line/70 px-5 py-2">
             <details>
               <summary className="cursor-pointer text-xs font-medium text-ink-soft hover:text-ink">
                 Adjust {p.employeeName}

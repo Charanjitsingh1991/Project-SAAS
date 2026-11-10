@@ -1,14 +1,20 @@
 import "server-only";
 import { and, eq, inArray } from "drizzle-orm";
 import { db, schema } from "@/db";
-import { DEFAULT_ACCOUNTS } from "./accounting";
+import { accountsForCountry } from "./accounting";
 import type { Ctx } from "./activity";
 
-/** Create the default chart of accounts for a workspace (idempotent). */
+async function countryOfOrg(orgId: number) {
+  const [o] = await db.select({ country: schema.organizations.country }).from(schema.organizations).where(eq(schema.organizations.id, orgId)).limit(1);
+  return o?.country ?? "IN";
+}
+
+/** Create the country's default chart of accounts for a workspace (idempotent; adds missing accounts only). */
 export async function ensureChartOfAccounts(orgId: number) {
+  const defs = accountsForCountry(await countryOfOrg(orgId));
   await db
     .insert(schema.accounts)
-    .values(DEFAULT_ACCOUNTS.map((a) => ({ orgId, code: a.code, name: a.name, type: a.type, systemKey: a.key })))
+    .values(defs.map((a) => ({ orgId, code: a.code, name: a.name, type: a.type, systemKey: a.key })))
     .onConflictDoNothing();
 }
 
@@ -18,7 +24,8 @@ export async function accountIds(orgId: number) {
     .select({ id: schema.accounts.id, key: schema.accounts.systemKey })
     .from(schema.accounts)
     .where(eq(schema.accounts.orgId, orgId));
-  if (rows.length < DEFAULT_ACCOUNTS.length) {
+  const have = new Set(rows.map((r) => r.key));
+  if (accountsForCountry(await countryOfOrg(orgId)).some((a) => !have.has(a.key))) {
     await ensureChartOfAccounts(orgId);
     rows = await db
       .select({ id: schema.accounts.id, key: schema.accounts.systemKey })

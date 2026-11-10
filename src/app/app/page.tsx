@@ -87,7 +87,7 @@ export default async function OverviewPage(props: PageProps<"/app">) {
           {denied === "manage"
             ? "Only owners and admins can open that page."
             : roleCanUse(ws.role, denied as ModuleKey)
-              ? "That module isn't included in your current plan. Upgrade to Growth on the Billing page."
+              ? "That module is switched off or not in your plan. Owners can change modules in Settings."
               : "Your role doesn't include that module. Ask an admin to change your role."}
         </p>
       )}
@@ -126,7 +126,7 @@ export default async function OverviewPage(props: PageProps<"/app">) {
               return (
                 <Link
                   key={m.key}
-                  href={locked ? "/app/billing" : `/app/${m.key}`}
+                  href={locked ? "/app/settings" : `/app/${m.key}`}
                   className={cn("rounded-2xl border border-ink/10 p-4 transition hover:-translate-y-0.5", m.color, locked && "opacity-60")}
                 >
                   <div className="flex items-center justify-between">
@@ -136,7 +136,7 @@ export default async function OverviewPage(props: PageProps<"/app">) {
                     {locked && <Lock className="size-4" />}
                   </div>
                   <p className="mt-3 font-display font-semibold">{m.name}</p>
-                  <p className="text-sm text-ink/65">{locked ? "Upgrade to Growth" : m.tagline}</p>
+                  <p className="text-sm text-ink/65">{locked ? "Switched off — enable in Settings" : m.tagline}</p>
                 </Link>
               );
             })}

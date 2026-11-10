@@ -22,12 +22,6 @@ export const MODULE_ACCESS: Record<ModuleKey, Role[]> = {
   analytics: ["owner", "admin", "finance"],
 };
 
-/** Modules included in each paid plan. Trials get everything. */
-export const PLAN_MODULES: Record<"starter" | "growth", ModuleKey[]> = {
-  starter: ["hrm", "crm", "projects"],
-  growth: ["hrm", "crm", "finance", "inventory", "payroll", "projects", "helpdesk", "analytics"],
-};
-
 export function roleCanUse(role: Role, mod: ModuleKey) {
   return MODULE_ACCESS[mod].includes(role);
 }

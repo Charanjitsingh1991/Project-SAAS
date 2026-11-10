@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { eq } from "drizzle-orm";
 import { Check, CreditCard, Lock } from "lucide-react";
 import { SubmitButton } from "@/components/app/forms";
 import { Badge, Card, PageHeader } from "@/components/app/ui";
 import { db, schema } from "@/db";
 import { formatDate } from "@/lib/format";
-import { PLAN_MODULES, canManage } from "@/lib/roles";
+import { PLANS } from "@/lib/plans";
+import { canManage } from "@/lib/roles";
 import { PLAN_PRICES, stripeConfigured, type Interval, type Plan } from "@/lib/stripe";
 import { requireWorkspace } from "@/lib/tenancy";
 import { cn } from "@/lib/utils";
@@ -25,15 +27,32 @@ const NOTICES: Record<string, { tone: "ok" | "warn"; text: string }> = {
 };
 
 const PLAN_COPY: Record<Plan, { name: string; blurb: string; features: string[] }> = {
-  starter: { name: "Starter", blurb: "For small teams getting out of spreadsheets.", features: ["People & HRM", "Sales CRM", "Projects", "Up to 25 users"] },
-  growth: { name: "Growth", blurb: "Every module, unlimited users.", features: ["All 8 modules", "Payroll & Finance", "Inventory & Helpdesk", "Analytics"] },
+  starter: { name: PLANS.starter.name, blurb: PLANS.starter.blurb, features: PLANS.starter.highlights },
+  growth: { name: PLANS.growth.name, blurb: PLANS.growth.blurb, features: PLANS.growth.highlights },
+};
+
+const UPGRADE_LABEL: Record<string, string> = {
+  automations: "Cross-module automations",
+  recruitment: "Recruitment",
+  performance: "Performance reviews",
+  expenseClaims: "Expense claims",
+  webForms: "Web-to-lead forms",
+  recurringInvoices: "Recurring invoices",
+  bankReconciliation: "Bank reconciliation",
+  supportPortal: "The customer support portal",
+  auditLog: "The audit log",
 };
 
 export default async function BillingPage(props: PageProps<"/app/billing">) {
   const ws = await requireWorkspace({ allowLocked: true });
   const sp = await props.searchParams;
   const noticeKey = Object.entries(sp).map(([k, v]) => `${k}=${v}`).find((k) => NOTICES[k]);
-  const notice = noticeKey ? NOTICES[noticeKey] : null;
+  const upgrade = typeof sp.upgrade === "string" ? UPGRADE_LABEL[sp.upgrade] : undefined;
+  const notice = noticeKey
+    ? NOTICES[noticeKey]
+    : upgrade
+      ? { tone: "warn" as const, text: `${upgrade} is part of the Growth plan. Upgrade below to unlock it.` }
+      : null;
   const { org, access } = ws;
   const manager = canManage(ws.role);
   const configured = stripeConfigured();
@@ -91,7 +110,7 @@ export default async function BillingPage(props: PageProps<"/app/billing">) {
           {access.state === "paid" && (
             <div className="space-y-1">
               <p className="font-display text-2xl font-semibold">
-                {PLAN_COPY[org.plan].name} plan <Badge tone="mint">{org.subscriptionStatus === "trialing" ? "active · trial" : "active"}</Badge>
+                {PLANS[org.plan].name} plan <Badge tone="mint">{org.subscriptionStatus === "trialing" ? "active · trial" : "active"}</Badge>
               </p>
               <p className="text-sm text-ink-soft">
                 {seats} seat{seats === 1 ? "" : "s"} · billed {org.billingInterval === "year" ? "yearly" : "monthly"}
@@ -171,7 +190,7 @@ export default async function BillingPage(props: PageProps<"/app/billing">) {
                   ))}
                 </ul>
                 <p className={cn("mt-4 text-xs", plan === "growth" ? "text-paper/55" : "text-ink-mute")}>
-                  Includes: {PLAN_MODULES[plan].join(", ")} · {seats} seat{seats === 1 ? "" : "s"} today
+                  {PLANS[plan].moduleLimit ? `Choose any ${PLANS[plan].moduleLimit} modules` : "All modules"} · {seats} seat{seats === 1 ? "" : "s"} today
                 </p>
                 <div className="mt-6 grid grid-cols-2 gap-2">
                   {(["month", "year"] as Interval[]).map((interval) => (
@@ -194,6 +213,15 @@ export default async function BillingPage(props: PageProps<"/app/billing">) {
                 </div>
               </div>
             ))}
+          </div>
+          <div className="mt-5 flex flex-wrap items-center gap-4 rounded-[22px] border border-dashed border-ink/25 p-6">
+            <div className="flex-1">
+              <h3 className="text-xl font-semibold">{PLANS.enterprise.name}</h3>
+              <p className="text-sm text-ink-soft">{PLANS.enterprise.highlights.join(" · ")}</p>
+            </div>
+            <Link href="/#contact" className="rounded-full border border-ink/20 px-5 py-2.5 text-sm font-medium hover:border-ink">
+              Talk to sales
+            </Link>
           </div>
           <p className="mt-4 text-xs text-ink-mute">Payments are processed by Stripe. Card details never touch our servers.</p>
         </>

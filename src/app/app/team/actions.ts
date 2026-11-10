@@ -1,14 +1,14 @@
 "use server";
 
 import { randomBytes } from "node:crypto";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, gt, isNull } from "drizzle-orm";
 import { refresh } from "next/cache";
 import { z } from "zod";
 import { db, schema } from "@/db";
 import type { FormState } from "@/lib/definitions";
 import { formObject } from "@/lib/format";
 import { syncSeats } from "@/lib/stripe";
-import { requireWorkspace } from "@/lib/tenancy";
+import { planOf, requireWorkspace } from "@/lib/tenancy";
 
 const InvitableRole = z.enum(["admin", "hr", "sales", "finance", "member"]);
 
@@ -19,6 +19,18 @@ export async function inviteMember(_: FormState, fd: FormData): Promise<FormStat
     .safeParse(formObject(fd));
   if (!parsed.success) return { errors: z.flattenError(parsed.error).fieldErrors };
   const { email, role } = parsed.data;
+
+  const plan = planOf(ws);
+  if (plan.maxUsers !== null) {
+    const members = await db.$count(schema.memberships, eq(schema.memberships.orgId, ws.org.id));
+    const pending = await db.$count(
+      schema.invites,
+      and(eq(schema.invites.orgId, ws.org.id), isNull(schema.invites.acceptedAt), gt(schema.invites.expiresAt, new Date())),
+    );
+    if (members + pending >= plan.maxUsers) {
+      return { message: `The ${plan.name} plan allows up to ${plan.maxUsers} users. Upgrade to Growth for unlimited users.` };
+    }
+  }
 
   const [already] = await db
     .select({ id: schema.memberships.id })

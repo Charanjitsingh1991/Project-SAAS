@@ -12,12 +12,11 @@ import { MobileNav, NavLinks, OrgSwitcher, type NavItem } from "./nav";
 
 function buildNav(ws: ActiveWorkspace): { main: NavItem[]; modules: NavItem[]; settings: NavItem[] } {
   const included = planModules(ws);
-  const modules = MODULES.filter((m) => roleCanUse(ws.role, m.key as ModuleKey)).map((m) => ({
+  const modules = MODULES.filter((m) => roleCanUse(ws.role, m.key as ModuleKey) && included.includes(m.key as ModuleKey)).map((m) => ({
     href: `/app/${m.key}`,
     label: m.short,
     icon: m.key === "analytics" ? <BarChart3 className="size-3.5" /> : <m.icon className="size-3.5" />,
     color: m.color,
-    locked: !included.includes(m.key as ModuleKey),
   }));
   const settings: NavItem[] = [];
   if (canManage(ws.role)) {

@@ -2,12 +2,17 @@
 
 export function formatMoney(minor: number, currency = "INR", opts: { decimals?: boolean } = {}) {
   const showDecimals = opts.decimals ?? minor % 100 !== 0;
-  return new Intl.NumberFormat(currency === "INR" ? "en-IN" : "en-US", {
+  return new Intl.NumberFormat(localeFor(currency), {
     style: "currency",
     currency,
     minimumFractionDigits: showDecimals ? 2 : 0,
     maximumFractionDigits: showDecimals ? 2 : 0,
   }).format(minor / 100);
+}
+
+const LOCALES: Record<string, string> = { INR: "en-IN", AED: "en-AE", USD: "en-US", EUR: "en-IE", GBP: "en-GB" };
+export function localeFor(currency: string) {
+  return LOCALES[currency] ?? "en-US";
 }
 
 /** Compact form for KPI tiles: ₹4.8L, ₹1.2Cr, $12.4K. */
@@ -19,7 +24,7 @@ export function formatMoneyCompact(minor: number, currency = "INR") {
     if (abs >= 1e5) return `₹${(major / 1e5).toFixed(abs >= 1e6 ? 0 : 1)}L`;
     return formatMoney(Math.round(major) * 100, currency);
   }
-  return new Intl.NumberFormat("en-US", { style: "currency", currency, notation: "compact", maximumFractionDigits: 1 }).format(major);
+  return new Intl.NumberFormat(localeFor(currency), { style: "currency", currency, notation: "compact", maximumFractionDigits: 1 }).format(major);
 }
 
 /** "1,234.5" | "1234" | 1234.5 (major units) → minor units integer. */
@@ -83,7 +88,8 @@ export function amountInWords(minor: number, currency = "INR") {
     }
     words = parts.join(" ");
   }
-  const unit = currency === "INR" ? ["rupees", "paise"] : currency === "USD" ? ["dollars", "cents"] : [currency, "cents"];
+  const UNITS: Record<string, [string, string]> = { INR: ["rupees", "paise"], AED: ["UAE dirhams", "fils"], USD: ["US dollars", "cents"], EUR: ["euros", "cents"], GBP: ["pounds", "pence"] };
+  const unit = UNITS[currency] ?? [currency, "cents"];
   const out = `${words} ${unit[0]}${fraction ? ` and ${twoDigits(fraction)} ${unit[1]}` : ""} only`;
   return out.charAt(0).toUpperCase() + out.slice(1);
 }

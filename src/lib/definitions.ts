@@ -4,6 +4,8 @@ export const SignupSchema = z.object({
   name: z.string().trim().min(2, "Please enter your name."),
   email: z.email("Enter a valid email.").trim().toLowerCase(),
   company: z.string().trim().max(120).optional(),
+  country: z.enum(["IN", "AE"], "Choose your country."),
+  phone: z.string().trim().max(24).optional(),
   password: z
     .string()
     .min(8, "At least 8 characters.")

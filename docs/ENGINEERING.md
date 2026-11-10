@@ -1,6 +1,34 @@
 # Engineering conventions (saas.tech app)
 
-Read this before changing any module. The product spec is in `docs/MODULES.md`.
+Read this before changing any module. The product spec is in `docs/MODULES.md`; the competitive audit, plans and country rules are in `docs/AUDIT_PLANS_COUNTRIES.md`.
+
+## Countries (India `IN`, UAE `AE`) — never hard-code a country
+- `const pack = packOf(ws.org)` (from `@/lib/countries`) — or `packFor(ws)` from tenancy — gives currency, regions (`pack.regionLabel`, `pack.regions`), tax (`pack.tax.name` GST/VAT, `pack.tax.idLabel` GSTIN/TRN, `pack.tax.idPattern`, `pack.tax.rates` with `code/rate/label/kind`, `pack.tax.defaultCode`, `pack.tax.split(taxAmount, rate, placeOfSupply, orgRegion)` → display lines CGST+SGST / IGST / VAT), `pack.tax.invoiceTitle`, `pack.corporateTax` (AE), statutory org fields, HR field defs (`pack.hr.employeeFields` → which `employees` columns to show + validation regex), default leave types and holidays, payroll component labels, `pack.payroll.statutoryNote`.
+- Helpers: `taxOption(pack, code, rate)`, `defaultTaxRate(pack)`, `weekendOf(org)` (array of weekday numbers, 0=Sun), `statutoryOf(org)`, `fiscalYearFor(ymd, org.fiscalYearStart)`, `NATIONALITIES`, `nationalityName()`, `countryFromPhone()`, `isValidPhone()`.
+- Currency: always `ws.org.currency` (INR or AED). Never show ₹, "GST", "GSTIN", "PAN", "state" etc. as literals — use the pack. Amount in words: `amountInWords(minor, currency)`.
+- Tax-id columns are still named `gstin` / `customerGstin` in the DB but hold the GSTIN **or TRN** (label with `pack.tax.idLabel`). `state` / `placeOfSupply` hold a state **or emirate**.
+- Invoice/quote/credit-note lines carry `taxCode` (e.g. `SR`/`ZR`/`EX` or `GST18`/`EXEMPT`). VAT returns use the code's `kind`.
+- Weekends: never assume Sat/Sun — use `weekendOf(ws.org)`.
+- Fiscal year: `ws.org.fiscalYearStart` (IN default 4 = April, AE default 1 = January).
+
+## Plans & modules
+- `src/lib/plans.ts`: Starter (any 3 core modules, 25 users, 1 warehouse), Growth (all modules + features), Enterprise (+ audit log). Trials run on Growth.
+- `canUseModule(ws, key)` already includes the owner's module selection. Gate premium features with `requireWorkspace({ module, feature: "recruitment" })` on pages/actions, and `hasFeature(ws, "…")` to hide buttons/links. Features: automations, recruitment, performance, expenseClaims, webForms, recurringInvoices, bankReconciliation, supportPortal, auditLog.
+- Links into another module must check `canUseModule(ws, thatModule)` before rendering (a disabled module is invisible).
+- Limits: `planOf(ws).maxWarehouses`, `.maxUsers`.
+
+## Posting engine additions (`src/lib/posting.ts`)
+- Expense claims: `approveClaim(ctx, claimId, date?)`.
+- Loans: `disburseLoan(ctx, loanId)`.
+- Final settlement: `paySettlement(ctx, settlementId, date)`.
+- Credit notes: `issueCreditNote(ctx, invoiceId, { date, reason, restock, lines: [{ invoiceLineId, quantity }] })` and `refundCustomer(...)`.
+- Recurring invoices: `generateRecurringInvoice(ctx, id, { force })` and `runDueRecurring(ctx)` (call lazily on Finance page load).
+- Quotes: `convertQuoteToInvoice(ctx, quoteId)`.
+- Stock counts: `completeStockCount(ctx, countId)`.
+- Payroll: `markPayrollPaid` now posts from each payslip's `breakdown` JSON (`src/lib/payroll-types.ts`). It marks claims linked by `payslipId` reimbursed and reduces loan balances by `payslip.loanDeduction`.
+- Invoice balance due = `total − amountPaid − amountCredited`.
+- `moveStock` posts opening/adjustment/issue movements to the ledger automatically. Pass `post: false` only when a document posts the value itself.
+- Shared CSV parser: `parseCsv()` in `src/lib/csv.ts`.
 
 ## Stack facts
 - **Framework:** Next.js 16 App Router, with `cacheComponents: true`. This version differs from older Next.js; the docs are in `node_modules/next/dist/docs/`.

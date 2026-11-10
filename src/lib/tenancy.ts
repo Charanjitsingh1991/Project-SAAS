@@ -6,7 +6,9 @@ import { cache } from "react";
 import { db, schema } from "@/db";
 import type { Role } from "@/db/schema";
 import { getCurrentUser } from "./dal";
-import { PLAN_MODULES, canManage, roleCanUse, type ModuleKey } from "./roles";
+import { packOf } from "./countries";
+import { activeModules, effectivePlan, planHas, type Feature } from "./plans";
+import { canManage, roleCanUse, type ModuleKey } from "./roles";
 import { accessFor } from "./trial";
 
 export const ORG_COOKIE = "saas_org";
@@ -47,20 +49,34 @@ export const getWorkspace = cache(async () => {
 export type Workspace = NonNullable<Awaited<ReturnType<typeof getWorkspace>>>;
 export type ActiveWorkspace = Workspace & { org: NonNullable<Workspace["org"]>; role: Role; access: NonNullable<Workspace["access"]> };
 
-/** Modules this workspace's plan includes (all of them during the free trial). */
+/** The plan in force: trials run on Growth. */
+export function planOf(ws: ActiveWorkspace) {
+  return effectivePlan(ws.org, ws.access.state === "trial");
+}
+
+/** Modules switched on for this workspace (plan-allowed ∩ owner selection). */
 export function planModules(ws: ActiveWorkspace): ModuleKey[] {
-  return ws.access.state === "trial" ? PLAN_MODULES.growth : PLAN_MODULES[ws.org.plan];
+  return activeModules(planOf(ws), ws.org.enabledModules);
 }
 
 export function canUseModule(ws: ActiveWorkspace, mod: ModuleKey) {
   return roleCanUse(ws.role, mod) && planModules(ws).includes(mod);
 }
 
+export function hasFeature(ws: ActiveWorkspace, feature: Feature) {
+  return planHas(planOf(ws), feature);
+}
+
+/** Country pack for the active workspace. */
+export function packFor(ws: ActiveWorkspace) {
+  return packOf(ws.org);
+}
+
 /**
  * Guard for every workspace page and server action.
  * Redirects to login / setup / billing (when deactivated) / overview (no permission).
  */
-export async function requireWorkspace(opts: { module?: ModuleKey; manage?: boolean; allowLocked?: boolean } = {}) {
+export async function requireWorkspace(opts: { module?: ModuleKey; manage?: boolean; allowLocked?: boolean; feature?: Feature } = {}) {
   const ws = await getWorkspace();
   if (!ws) redirect("/login");
   if (!ws.org || !ws.role || !ws.access) redirect("/app/setup");
@@ -69,6 +85,7 @@ export async function requireWorkspace(opts: { module?: ModuleKey; manage?: bool
   if (active.access.state === "locked" && !opts.allowLocked) redirect("/app/billing");
   if (opts.manage && !canManage(active.role)) redirect("/app?denied=manage");
   if (opts.module && !canUseModule(active, opts.module)) redirect(`/app?denied=${opts.module}`);
+  if (opts.feature && !hasFeature(active, opts.feature)) redirect(`/app/billing?upgrade=${opts.feature}`);
   return active;
 }
 

@@ -5,7 +5,8 @@ import { ActionForm, Input, SubmitButton } from "@/components/app/forms";
 import { Card, EmptyState, PageHeader, Stat, StatusBadge, Table, Td, Th } from "@/components/app/ui";
 import { db, schema } from "@/db";
 import { formatMoney, formatPeriod, todayYmd } from "@/lib/format";
-import { requireWorkspace } from "@/lib/tenancy";
+import { fiscalYearFor } from "@/lib/countries";
+import { packFor, requireWorkspace } from "@/lib/tenancy";
 import { createRun } from "./actions";
 
 export const metadata: Metadata = { title: "Payroll" };
@@ -16,8 +17,8 @@ export default async function PayrollPage() {
   const cur = ws.org.currency;
   const today = todayYmd();
   const month = today.slice(0, 7);
-  const year = Number(today.slice(0, 4));
-  const fyStart = `${Number(month.slice(5)) >= 4 ? year : year - 1}-04`;
+  const pack = packFor(ws);
+  const fyStart = fiscalYearFor(today, pack.fiscalYearStartMonth)[0].slice(0, 7);
 
   const [runs, active, ytd] = await Promise.all([
     db.select().from(schema.payrollRuns).where(eq(schema.payrollRuns.orgId, orgId)).orderBy(desc(schema.payrollRuns.period)),
@@ -36,13 +37,13 @@ export default async function PayrollPage() {
 
   return (
     <>
-      <PageHeader title="Payroll" description="Monthly runs with proration, LOP, PF, ESI, professional tax and TDS — draft, approve, then pay." />
+      <PageHeader title="Payroll" description={pack.code === "AE" ? "Monthly runs with proration, LOP, GPSSA, gratuity accrual and WPS salary files — draft, approve, then pay." : "Monthly runs with proration, LOP, PF, ESI, professional tax and TDS — draft, approve, then pay."} />
 
       <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Stat label="Monthly payroll cost" value={formatMoney(monthlyCost, cur)} hint="Sum of active CTC ÷ 12" tone="mint" />
+        <Stat label="Monthly payroll cost" value={formatMoney(monthlyCost, cur)} hint={pack.code === "AE" ? "Sum of active packages ÷ 12" : "Sum of active CTC ÷ 12"} tone="mint" />
         <Stat label="Last run net" value={last ? formatMoney(last.totalNet, cur) : "—"} hint={last ? formatPeriod(last.period) : "No runs yet"} tone="sky" />
-        <Stat label="Paid this fiscal year" value={formatMoney(Number(ytd[0]?.v ?? 0), cur)} hint={`Net paid since Apr ${fyStart.slice(0, 4)}`} tone="butter" />
-        <Stat label="Employees on payroll" value={Number(active[0]?.n ?? 0)} hint="Active with a CTC" tone="lilac" />
+        <Stat label="Paid this fiscal year" value={formatMoney(Number(ytd[0]?.v ?? 0), cur)} hint={`Net paid since ${formatPeriod(fyStart)}`} tone="butter" />
+        <Stat label="Employees on payroll" value={Number(active[0]?.n ?? 0)} hint="Active with a salary" tone="lilac" />
       </div>
 
       <Card title="Run payroll" className="mb-6">

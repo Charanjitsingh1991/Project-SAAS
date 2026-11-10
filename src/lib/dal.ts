@@ -16,6 +16,7 @@ export async function getCurrentUser() {
       name: schema.users.name,
       email: schema.users.email,
       company: schema.users.company,
+      phone: schema.users.phone,
       createdAt: schema.users.createdAt,
     })
     .from(schema.users)

@@ -9,7 +9,9 @@
     "lint": "eslint",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test src/lib/__tests__/*.test.ts",
+    "smoke": "cp local.db /tmp/smoke.db && DATABASE_URL=file:/tmp/smoke.db tsx --conditions=react-server scripts/smoke-countries.ts"
   },
   "dependencies": {
     "@libsql/client": "^0.18.0",

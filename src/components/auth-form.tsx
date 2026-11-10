@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useActionState, useState } from "react";
 import { ArrowUpRight, Eye, EyeOff, Loader2 } from "lucide-react";
 import { login, signup } from "@/app/actions/auth";
+import { CountryPhoneFields } from "./country-phone";
 import { Field } from "./ui/field";
 
 export function AuthForm({
@@ -45,6 +46,7 @@ export function AuthForm({
           )}
         </div>
       )}
+      {isSignup && !invite && <CountryPhoneFields defaultCountry={v.country} defaultPhone={v.phone} phoneError={state?.errors?.phone?.[0]} />}
       <Field
         label="Work email"
         name="email"

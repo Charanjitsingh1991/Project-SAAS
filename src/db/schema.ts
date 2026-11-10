@@ -26,6 +26,7 @@ export const users = sqliteTable("users", {
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
   company: text("company"),
+  phone: text("phone"), // E.164, e.g. +971501234567
   passwordHash: text("password_hash").notNull(),
   createdAt: createdAt(),
 });
@@ -35,6 +36,10 @@ export const organizations = sqliteTable("organizations", {
   name: text("name").notNull(),
   /** Public slug for the support portal (/support/[slug]). */
   slug: text("slug").notNull().unique(),
+  /** ISO country code of the workspace; drives tax, payroll, leave, holidays and formats (see lib/countries). */
+  country: text("country", { enum: ["IN", "AE"] }).notNull().default("IN"),
+  phone: text("phone"),
+  timezone: text("timezone").notNull().default("Asia/Kolkata"),
   currency: text("currency").notNull().default("INR"),
   /** Workspace state/region — decides CGST+SGST vs IGST on invoices. */
   state: text("state"),
@@ -42,8 +47,16 @@ export const organizations = sqliteTable("organizations", {
   address: text("address"),
   /** JSON object of automation toggles; see lib/automations.ts for keys/defaults. */
   automations: text("automations").notNull().default("{}"),
+  /** JSON array of enabled module keys; null = every module the plan allows. */
+  enabledModules: text("enabled_modules"),
+  /** JSON array of weekend weekdays (0 = Sunday … 6 = Saturday). */
+  weekendDays: text("weekend_days").notNull().default("[0,6]"),
+  /** Month (1–12) the fiscal year starts. */
+  fiscalYearStart: integer("fiscal_year_start").notNull().default(4),
+  /** JSON object of country-specific employer IDs (e.g. MOHRE establishment ID, WPS routing code, TAN, EPF code). */
+  statutory: text("statutory").notNull().default("{}"),
   ownerId: integer("owner_id").notNull(),
-  plan: text("plan", { enum: ["starter", "growth"] }).notNull().default("growth"),
+  plan: text("plan", { enum: ["starter", "growth", "enterprise"] }).notNull().default("growth"),
   trialStartedAt: integer("trial_started_at", { mode: "timestamp" }).notNull(),
   /** Exact instant access ends if unpaid: 00:00 (APP_TIMEZONE) at the start of day 15. */
   trialEndsAt: integer("trial_ends_at", { mode: "timestamp" }).notNull(),
@@ -173,13 +186,28 @@ export const employees = sqliteTable(
     status: text("status", { enum: EMPLOYEE_STATUSES }).notNull().default("active"),
     exitDate: text("exit_date"),
     exitReason: text("exit_reason"),
+    /** Annual cost-to-company (IN) / annual gross package (AE), minor units. */
     annualCtc: money("annual_ctc"),
+    /** Optional monthly component override JSON, e.g. {"basic":900000,"housing":375000,"transport":150000,"other":75000} (minor units). */
+    salaryComponents: text("salary_components"),
     pfEnrolled: integer("pf_enrolled", { mode: "boolean" }).notNull().default(true),
     metro: integer("metro", { mode: "boolean" }).notNull().default(true),
     pan: text("pan"),
     uan: text("uan"),
     bankAccount: text("bank_account"),
     ifsc: text("ifsc"),
+    nationality: text("nationality"), // ISO country code, e.g. "AE", "IN"
+    passportNumber: text("passport_number"),
+    passportExpiry: text("passport_expiry"),
+    visaNumber: text("visa_number"),
+    visaExpiry: text("visa_expiry"),
+    emiratesId: text("emirates_id"),
+    emiratesIdExpiry: text("emirates_id_expiry"),
+    labourCardNumber: text("labour_card_number"),
+    wpsPersonId: text("wps_person_id"), // MOHRE 14-digit person ID
+    iban: text("iban"),
+    bankName: text("bank_name"),
+    bankRoutingCode: text("bank_routing_code"),
     createdAt: createdAt(),
   },
   (t) => [index("employees_org").on(t.orgId), uniqueIndex("employee_org_code").on(t.orgId, t.code)],
@@ -221,6 +249,9 @@ export const leaveTypes = sqliteTable("leave_types", {
   code: text("code").notNull(),
   annualQuota: real("annual_quota").notNull().default(0),
   paid: integer("paid", { mode: "boolean" }).notNull().default(true),
+  /** Share of salary paid on this leave: 100 full, 50 half-pay (0.5 LOP per day), 0 unpaid. */
+  payPercent: integer("pay_percent").notNull().default(100),
+  appliesTo: text("applies_to", { enum: ["all", "female", "male"] }).notNull().default("all"),
   color: text("color").notNull().default("mint"),
   active: integer("active", { mode: "boolean" }).notNull().default(true),
 });
@@ -326,6 +357,15 @@ export const payslips = sqliteTable(
     net: money("net"),
     pfEmployer: money("pf_employer"),
     esiEmployer: money("esi_employer"),
+    transport: money("transport"),
+    reimbursements: money("reimbursements"),
+    loanDeduction: money("loan_deduction"),
+    pensionEmployee: money("pension_employee"),
+    pensionEmployer: money("pension_employer"),
+    gratuityAccrual: money("gratuity_accrual"),
+    employerCost: money("employer_cost"),
+    /** Country engine output: {"earnings":[{code,label,amount}],"deductions":[{code,label,amount,account}],"employer":[{code,label,amount,expenseAccount,liabilityAccount}]} */
+    breakdown: text("breakdown"),
     note: text("note"),
   },
   (t) => [index("payslips_run").on(t.runId), index("payslips_emp").on(t.employeeId)],
@@ -445,7 +485,7 @@ export const accounts = sqliteTable(
   (t) => [uniqueIndex("account_org_code").on(t.orgId, t.code), index("account_org_key").on(t.orgId, t.systemKey)],
 );
 
-export const SOURCE_TYPES = ["invoice", "payment", "expense", "bill_payment", "payroll", "stock", "manual", "reversal"] as const;
+export const SOURCE_TYPES = ["invoice", "payment", "expense", "bill_payment", "payroll", "stock", "manual", "reversal", "credit_note", "claim", "loan", "settlement", "stock_count"] as const;
 
 export const journalEntries = sqliteTable(
   "journal_entries",
@@ -516,6 +556,8 @@ export const invoices = sqliteTable(
     taxTotal: money("tax_total"),
     total: money("total"),
     amountPaid: money("amount_paid"),
+    /** Sum of credit notes issued against this invoice. Balance due = total − amountPaid − amountCredited. */
+    amountCredited: money("amount_credited"),
     notes: text("notes"),
     dealId: integer("deal_id"),
     projectId: integer("project_id"),
@@ -538,6 +580,8 @@ export const invoiceLines = sqliteTable(
     quantity: real("quantity").notNull().default(1),
     unitPrice: money("unit_price"),
     taxRate: real("tax_rate").notNull().default(0), // percent
+    /** Country tax code, e.g. "SR"/"ZR"/"EX" (UAE VAT) or "GST18"/"EXEMPT" (India). Drives return boxes. */
+    taxCode: text("tax_code"),
     amount: money("amount"), // quantity × unitPrice (excl. tax)
     taxAmount: money("tax_amount"),
     sortOrder: integer("sort_order").notNull().default(0),
@@ -918,6 +962,393 @@ export const kbArticles = sqliteTable(
       .default(sql`(unixepoch())`),
   },
   (t) => [uniqueIndex("kb_org_slug").on(t.orgId, t.slug)],
+);
+
+
+/* ═════════════ HRM: documents, assets, recruitment, performance, claims ═════════════ */
+
+export const DOCUMENT_TYPES = ["passport", "visa", "emirates_id", "labour_card", "pan", "aadhaar", "driving_licence", "contract", "certificate", "other"] as const;
+
+export const employeeDocuments = sqliteTable(
+  "employee_documents",
+  {
+    id: id(),
+    orgId: orgId(),
+    employeeId: integer("employee_id")
+      .notNull()
+      .references(() => employees.id, { onDelete: "cascade" }),
+    type: text("type", { enum: DOCUMENT_TYPES }).notNull(),
+    number: text("number"),
+    issueDate: text("issue_date"),
+    expiryDate: text("expiry_date"),
+    note: text("note"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("emp_docs_emp").on(t.employeeId), index("emp_docs_expiry").on(t.orgId, t.expiryDate)],
+);
+
+export const ASSET_STATUSES = ["available", "assigned", "repair", "retired"] as const;
+
+export const assets = sqliteTable(
+  "assets",
+  {
+    id: id(),
+    orgId: orgId(),
+    tag: text("tag").notNull(), // e.g. AST-0007
+    name: text("name").notNull(),
+    category: text("category").notNull().default("Laptop"),
+    serialNumber: text("serial_number"),
+    purchaseDate: text("purchase_date"),
+    cost: money("cost"),
+    status: text("status", { enum: ASSET_STATUSES }).notNull().default("available"),
+    assignedTo: integer("assigned_to").references(() => employees.id, { onDelete: "set null" }),
+    assignedAt: text("assigned_at"),
+    note: text("note"),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("asset_org_tag").on(t.orgId, t.tag)],
+);
+
+export const JOB_STATUSES = ["draft", "open", "on_hold", "closed"] as const;
+
+export const jobOpenings = sqliteTable(
+  "job_openings",
+  {
+    id: id(),
+    orgId: orgId(),
+    title: text("title").notNull(),
+    departmentId: integer("department_id").references(() => departments.id, { onDelete: "set null" }),
+    location: text("location"),
+    employmentType: text("employment_type", { enum: EMPLOYMENT_TYPES }).notNull().default("full_time"),
+    openings: integer("openings").notNull().default(1),
+    salaryMin: money("salary_min"),
+    salaryMax: money("salary_max"),
+    description: text("description"),
+    status: text("status", { enum: JOB_STATUSES }).notNull().default("open"),
+    hiringManagerId: integer("hiring_manager_id"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("jobs_org").on(t.orgId)],
+);
+
+export const CANDIDATE_STAGES = ["applied", "screening", "interview", "offer", "hired", "rejected"] as const;
+
+export const candidates = sqliteTable(
+  "candidates",
+  {
+    id: id(),
+    orgId: orgId(),
+    jobId: integer("job_id")
+      .notNull()
+      .references(() => jobOpenings.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    email: text("email"),
+    phone: text("phone"),
+    source: text("source").notNull().default("other"),
+    stage: text("stage", { enum: CANDIDATE_STAGES }).notNull().default("applied"),
+    rating: integer("rating"), // 1–5
+    expectedSalary: money("expected_salary"),
+    currentCompany: text("current_company"),
+    noticePeriodDays: integer("notice_period_days"),
+    notes: text("notes"),
+    rejectionReason: text("rejection_reason"),
+    employeeId: integer("employee_id"), // set when hired
+    sortOrder: real("sort_order").notNull().default(0),
+    stageChangedAt: integer("stage_changed_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+    createdAt: createdAt(),
+  },
+  (t) => [index("candidates_job").on(t.jobId), index("candidates_org").on(t.orgId)],
+);
+
+export const goals = sqliteTable(
+  "goals",
+  {
+    id: id(),
+    orgId: orgId(),
+    employeeId: integer("employee_id")
+      .notNull()
+      .references(() => employees.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    description: text("description"),
+    cycle: text("cycle").notNull(), // e.g. "2026-H2"
+    dueDate: text("due_date"),
+    progress: integer("progress").notNull().default(0), // 0–100
+    weight: integer("weight").notNull().default(1),
+    status: text("status", { enum: ["on_track", "at_risk", "off_track", "done"] }).notNull().default("on_track"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("goals_emp").on(t.employeeId)],
+);
+
+export const performanceReviews = sqliteTable(
+  "performance_reviews",
+  {
+    id: id(),
+    orgId: orgId(),
+    employeeId: integer("employee_id")
+      .notNull()
+      .references(() => employees.id, { onDelete: "cascade" }),
+    reviewerId: integer("reviewer_id").references(() => employees.id, { onDelete: "set null" }),
+    cycle: text("cycle").notNull(),
+    selfRating: integer("self_rating"),
+    selfComments: text("self_comments"),
+    managerRating: integer("manager_rating"),
+    strengths: text("strengths"),
+    improvements: text("improvements"),
+    status: text("status", { enum: ["self_review", "manager_review", "completed"] }).notNull().default("self_review"),
+    completedAt: integer("completed_at", { mode: "timestamp" }),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("review_emp_cycle").on(t.employeeId, t.cycle)],
+);
+
+export const CLAIM_STATUSES = ["submitted", "approved", "rejected", "reimbursed"] as const;
+
+export const expenseClaims = sqliteTable(
+  "expense_claims",
+  {
+    id: id(),
+    orgId: orgId(),
+    employeeId: integer("employee_id")
+      .notNull()
+      .references(() => employees.id, { onDelete: "cascade" }),
+    date: text("date").notNull(),
+    /** Expense account system key (travel, supplies, software, …). */
+    category: text("category").notNull(),
+    description: text("description").notNull(),
+    amount: money("amount"), // excl. tax
+    taxAmount: money("tax_amount"),
+    total: money("total"),
+    status: text("status", { enum: CLAIM_STATUSES }).notNull().default("submitted"),
+    /** "payroll" = paid with the next payroll run; "direct" = paid from bank on approval. */
+    reimburseVia: text("reimburse_via", { enum: ["payroll", "direct"] }).notNull().default("payroll"),
+    decidedBy: integer("decided_by"),
+    decidedAt: integer("decided_at", { mode: "timestamp" }),
+    rejectionReason: text("rejection_reason"),
+    payslipId: integer("payslip_id"),
+    reimbursedAt: integer("reimbursed_at", { mode: "timestamp" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("claims_org_status").on(t.orgId, t.status), index("claims_emp").on(t.employeeId)],
+);
+
+/* ═════════════ Payroll: loans & final settlement ═════════════ */
+
+export const employeeLoans = sqliteTable(
+  "employee_loans",
+  {
+    id: id(),
+    orgId: orgId(),
+    employeeId: integer("employee_id")
+      .notNull()
+      .references(() => employees.id, { onDelete: "cascade" }),
+    type: text("type", { enum: ["loan", "advance"] }).notNull().default("advance"),
+    principal: money("principal"),
+    monthlyInstallment: money("monthly_installment"),
+    balance: money("balance"),
+    disbursedOn: text("disbursed_on").notNull(),
+    startPeriod: text("start_period").notNull(), // YYYY-MM of first deduction
+    status: text("status", { enum: ["active", "closed"] }).notNull().default("active"),
+    note: text("note"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("loans_emp").on(t.employeeId)],
+);
+
+export const finalSettlements = sqliteTable(
+  "final_settlements",
+  {
+    id: id(),
+    orgId: orgId(),
+    employeeId: integer("employee_id")
+      .notNull()
+      .references(() => employees.id, { onDelete: "cascade" }),
+    exitDate: text("exit_date").notNull(),
+    serviceDays: integer("service_days").notNull(),
+    pendingSalary: money("pending_salary"),
+    leaveEncashmentDays: real("leave_encashment_days").notNull().default(0),
+    leaveEncashment: money("leave_encashment"),
+    gratuity: money("gratuity"),
+    otherEarnings: money("other_earnings"),
+    loanRecovery: money("loan_recovery"),
+    otherDeductions: money("other_deductions"),
+    netPayable: money("net_payable"),
+    breakdown: text("breakdown"), // JSON explanation lines
+    status: text("status", { enum: ["draft", "paid"] }).notNull().default("draft"),
+    paidOn: text("paid_on"),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("settlement_emp").on(t.employeeId)],
+);
+
+/* ═════════════ CRM: quotes & web forms ═════════════ */
+
+export const QUOTE_STATUSES = ["draft", "sent", "accepted", "declined", "expired", "invoiced"] as const;
+
+export const quotes = sqliteTable(
+  "quotes",
+  {
+    id: id(),
+    orgId: orgId(),
+    number: text("number").notNull(), // QT-0001
+    dealId: integer("deal_id").references(() => deals.id, { onDelete: "set null" }),
+    companyId: integer("company_id").references(() => companies.id, { onDelete: "set null" }),
+    contactId: integer("contact_id").references(() => contacts.id, { onDelete: "set null" }),
+    customerName: text("customer_name").notNull(),
+    customerEmail: text("customer_email"),
+    placeOfSupply: text("place_of_supply"),
+    issueDate: text("issue_date").notNull(),
+    validUntil: text("valid_until").notNull(),
+    status: text("status", { enum: QUOTE_STATUSES }).notNull().default("draft"),
+    subtotal: money("subtotal"),
+    taxTotal: money("tax_total"),
+    total: money("total"),
+    terms: text("terms"),
+    invoiceId: integer("invoice_id"),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("quote_org_number").on(t.orgId, t.number)],
+);
+
+export const quoteLines = sqliteTable(
+  "quote_lines",
+  {
+    id: id(),
+    orgId: orgId(),
+    quoteId: integer("quote_id")
+      .notNull()
+      .references(() => quotes.id, { onDelete: "cascade" }),
+    productId: integer("product_id"),
+    description: text("description").notNull(),
+    quantity: real("quantity").notNull().default(1),
+    unitPrice: money("unit_price"),
+    discountPercent: real("discount_percent").notNull().default(0),
+    taxRate: real("tax_rate").notNull().default(0),
+    taxCode: text("tax_code"),
+    amount: money("amount"), // after discount, excl. tax
+    taxAmount: money("tax_amount"),
+    sortOrder: integer("sort_order").notNull().default(0),
+  },
+  (t) => [index("quote_lines_q").on(t.quoteId)],
+);
+
+/* ═════════════ Finance: credit notes, recurring, bank reconciliation ═════════════ */
+
+export const creditNotes = sqliteTable(
+  "credit_notes",
+  {
+    id: id(),
+    orgId: orgId(),
+    number: text("number").notNull(), // CN-0001
+    invoiceId: integer("invoice_id")
+      .notNull()
+      .references(() => invoices.id),
+    date: text("date").notNull(),
+    reason: text("reason").notNull(),
+    subtotal: money("subtotal"),
+    taxTotal: money("tax_total"),
+    total: money("total"),
+    restock: integer("restock", { mode: "boolean" }).notNull().default(false),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("cn_org_number").on(t.orgId, t.number)],
+);
+
+export const creditNoteLines = sqliteTable(
+  "credit_note_lines",
+  {
+    id: id(),
+    orgId: orgId(),
+    creditNoteId: integer("credit_note_id")
+      .notNull()
+      .references(() => creditNotes.id, { onDelete: "cascade" }),
+    invoiceLineId: integer("invoice_line_id"),
+    productId: integer("product_id"),
+    description: text("description").notNull(),
+    quantity: real("quantity").notNull(),
+    unitPrice: money("unit_price"),
+    taxRate: real("tax_rate").notNull().default(0),
+    taxCode: text("tax_code"),
+    amount: money("amount"),
+    taxAmount: money("tax_amount"),
+  },
+  (t) => [index("cn_lines_cn").on(t.creditNoteId)],
+);
+
+export const recurringInvoices = sqliteTable(
+  "recurring_invoices",
+  {
+    id: id(),
+    orgId: orgId(),
+    /** Source invoice whose header and lines are copied each cycle. */
+    templateInvoiceId: integer("template_invoice_id")
+      .notNull()
+      .references(() => invoices.id, { onDelete: "cascade" }),
+    frequency: text("frequency", { enum: ["monthly", "quarterly", "yearly"] }).notNull().default("monthly"),
+    nextDate: text("next_date").notNull(),
+    endDate: text("end_date"),
+    autoSend: integer("auto_send", { mode: "boolean" }).notNull().default(false),
+    active: integer("active", { mode: "boolean" }).notNull().default(true),
+    lastGeneratedAt: integer("last_generated_at", { mode: "timestamp" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("recurring_org").on(t.orgId)],
+);
+
+export const bankStatementLines = sqliteTable(
+  "bank_statement_lines",
+  {
+    id: id(),
+    orgId: orgId(),
+    date: text("date").notNull(),
+    description: text("description").notNull(),
+    reference: text("reference"),
+    amount: money("amount"), // signed: + money in, − money out
+    /** Matched journal entry (payment, bill payment, expense, payroll…). */
+    journalEntryId: integer("journal_entry_id"),
+    status: text("status", { enum: ["unmatched", "matched", "ignored"] }).notNull().default("unmatched"),
+    importBatch: text("import_batch"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("bank_lines_org").on(t.orgId, t.status)],
+);
+
+/* ═════════════ Inventory: stock counts ═════════════ */
+
+export const stockCounts = sqliteTable(
+  "stock_counts",
+  {
+    id: id(),
+    orgId: orgId(),
+    number: text("number").notNull(), // SC-0001
+    warehouseId: integer("warehouse_id")
+      .notNull()
+      .references(() => warehouses.id),
+    status: text("status", { enum: ["in_progress", "completed", "cancelled"] }).notNull().default("in_progress"),
+    note: text("note"),
+    completedAt: integer("completed_at", { mode: "timestamp" }),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("sc_org_number").on(t.orgId, t.number)],
+);
+
+export const stockCountLines = sqliteTable(
+  "stock_count_lines",
+  {
+    id: id(),
+    orgId: orgId(),
+    countId: integer("count_id")
+      .notNull()
+      .references(() => stockCounts.id, { onDelete: "cascade" }),
+    productId: integer("product_id")
+      .notNull()
+      .references(() => products.id),
+    expectedQty: real("expected_qty").notNull(),
+    countedQty: real("counted_qty"),
+  },
+  (t) => [uniqueIndex("sc_line_product").on(t.countId, t.productId)],
 );
 
 export type User = typeof users.$inferSelect;

@@ -5,6 +5,9 @@ import { and, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { formatDate, formatMoney, formatPeriod } from "@/lib/format";
 import { amountInWords } from "@/lib/money";
+import { packFor } from "@/lib/tenancy";
+import { legacyBreakdown } from "@/lib/posting";
+import { REIMBURSEMENT_CODE, parseBreakdown, sumLines } from "@/lib/payroll-types";
 import { canUseModule, requireWorkspace } from "@/lib/tenancy";
 import { PrintButton } from "../../print-button";
 
@@ -31,20 +34,26 @@ export default async function PayslipPage(props: PageProps<"/app/payroll/payslip
   if (!isPayroll && !(isSelf && run.status !== "draft")) notFound();
 
   const m = (n: number) => formatMoney(n, ws.org.currency);
-  const earnings: [string, number][] = [
-    ["Basic", p.basic],
-    ["House rent allowance", p.hra],
-    ["Special allowance", p.special],
-    ["Bonus", p.bonus],
-    ["Other earnings", p.otherEarnings],
-  ];
-  const deductions: [string, number][] = [
-    ["Provident fund", p.pfEmployee],
-    ["ESI", p.esiEmployee],
-    ["Professional tax", p.professionalTax],
-    ["Income tax (TDS)", p.tds],
-    ["Other deductions", p.otherDeductions],
-  ];
+  const pack = packFor(ws);
+  const b = parseBreakdown(p.breakdown) ?? legacyBreakdown(p);
+  const salary = b.earnings.filter((e) => e.code !== REIMBURSEMENT_CODE);
+  const reimbursed = sumLines(b.earnings.filter((e) => e.code === REIMBURSEMENT_CODE));
+  const earnings: [string, number][] = salary.filter((e) => e.amount).map((e) => [e.label, e.amount]);
+  const deductions: [string, number][] = b.deductions.filter((d) => d.amount).map((d) => [d.label, d.amount]);
+  const employer = b.employer.filter((r) => r.amount);
+  const mask = (v: string | null) => (v ? `••••${v.slice(-4)}` : "—");
+  const ids: [string, string][] =
+    pack.code === "AE"
+      ? [
+          ["Emirates ID", mask(emp.emiratesId)],
+          ["MOHRE person ID", emp.wpsPersonId ?? "—"],
+          ["IBAN", mask(emp.iban)],
+        ]
+      : [
+          ["PAN", emp.pan ?? "—"],
+          ["UAN", emp.uan ?? "—"],
+          ["Bank account", mask(emp.bankAccount)],
+        ];
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -60,7 +69,7 @@ export default async function PayslipPage(props: PageProps<"/app/payroll/payslip
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">{ws.org.name}</h1>
             {ws.org.address && <p className="mt-1 max-w-xs text-sm whitespace-pre-line text-ink-soft">{ws.org.address}</p>}
-            {ws.org.gstin && <p className="mt-1 font-mono text-xs text-ink-mute">GSTIN {ws.org.gstin}</p>}
+            {ws.org.gstin && <p className="mt-1 font-mono text-xs text-ink-mute">{pack.tax.idLabel} {ws.org.gstin}</p>}
           </div>
           <div className="text-right">
             <p className="font-mono text-[11px] tracking-widest text-ink-mute uppercase">Payslip</p>
@@ -76,9 +85,7 @@ export default async function PayslipPage(props: PageProps<"/app/payroll/payslip
             ["Designation", p.designation ?? "—"],
             ["Department", p.department ?? "—"],
             ["Date of joining", formatDate(emp.joinDate)],
-            ["PAN", emp.pan ?? "—"],
-            ["UAN", emp.uan ?? "—"],
-            ["Bank account", emp.bankAccount ? `••••${emp.bankAccount.slice(-4)}` : "—"],
+            ...ids,
             ["Days in month", String(run.daysInMonth)],
             ["Paid days", String(p.paidDays)],
             ["LOP days", String(p.lopDays)],
@@ -92,15 +99,21 @@ export default async function PayslipPage(props: PageProps<"/app/payroll/payslip
 
         <div className="grid gap-6 py-5 md:grid-cols-2">
           <LedgerTable title="Earnings" rows={earnings} totalLabel="Gross earnings" total={p.gross} m={m} />
-          <LedgerTable title="Deductions" rows={deductions} totalLabel="Total deductions" total={p.totalDeductions} m={m} />
+          <LedgerTable title="Deductions" rows={deductions.length ? deductions : [["No deductions", 0]]} totalLabel="Total deductions" total={p.totalDeductions} m={m} />
         </div>
 
-        <div className="rounded-2xl bg-paper/60 p-4 text-sm">
-          <p className="font-mono text-[11px] tracking-widest text-ink-mute uppercase">Employer contributions (not part of net pay)</p>
-          <p className="mt-1 text-ink-soft">
-            Provident fund {m(p.pfEmployer)} · ESI {m(p.esiEmployer)}
+        {reimbursed > 0 && (
+          <p className="mb-3 text-sm text-ink-soft">
+            Expense reimbursements added to net pay: <span className="font-medium text-ink">{m(reimbursed)}</span>
           </p>
-        </div>
+        )}
+        {employer.length > 0 && (
+          <div className="rounded-2xl bg-paper/60 p-4 text-sm">
+            <p className="font-mono text-[11px] tracking-widest text-ink-mute uppercase">Employer contributions (not part of net pay)</p>
+            <p className="mt-1 text-ink-soft">{employer.map((r) => `${r.label} ${m(r.amount)}`).join(" · ")}</p>
+          </div>
+        )}
+        {b.notes?.length ? <p className="mt-3 text-xs text-ink-mute">{b.notes.join(" ")}</p> : null}
 
         <div className="mt-5 rounded-2xl bg-mint p-6 text-center">
           <p className="font-mono text-[11px] tracking-widest text-ink/60 uppercase">Net pay</p>

@@ -2,6 +2,7 @@ import "server-only";
 import { and, eq, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import type { Ctx } from "./activity";
+import { postJournal } from "./ledger";
 
 export async function defaultWarehouseId(orgId: number) {
   const [wh] = await db
@@ -37,7 +38,13 @@ type Movement = {
   sourceType?: string | null;
   sourceId?: number | null;
   note?: string | null;
+  /** Ledger posting for opening/adjustment/issue movements (default true). Sales, receipts and transfers are posted by their documents. */
+  post?: boolean;
+  /** Journal date (YYYY-MM-DD); defaults to today. */
+  date?: string;
 };
+
+const todayYmd = () => new Intl.DateTimeFormat("en-CA", { timeZone: process.env.APP_TIMEZONE || "Asia/Kolkata" }).format(new Date());
 
 /**
  * Apply a signed stock movement: updates the warehouse level and appends to the movement ledger.
@@ -80,4 +87,29 @@ export async function moveStock(ctx: Ctx, m: Movement) {
     note: m.note ?? null,
     createdBy: ctx.userId,
   });
+
+  // Keep the ledger inventory account equal to stock value for movements no document posts.
+  if (m.post !== false && (m.type === "opening" || m.type === "adjustment" || m.type === "issue")) {
+    const value = Math.round(Math.abs(m.quantity) * (m.type === "opening" ? (m.unitCost ?? product.costPrice) : product.costPrice));
+    if (value > 0) {
+      const counter = m.type === "opening" ? "equity" : "stock_adjustments";
+      const memo = m.type === "opening" ? "Opening stock" : m.type === "issue" ? "Stock issued for internal use" : "Stock adjustment";
+      await postJournal(ctx, {
+        date: m.date ?? todayYmd(),
+        memo: `${memo}${m.reference ? ` — ${m.reference}` : ""}`,
+        sourceType: "stock",
+        sourceId: null,
+        lines:
+          m.quantity > 0
+            ? [
+                { key: "inventory", debit: value },
+                { key: counter, credit: value },
+              ]
+            : [
+                { key: counter, debit: value },
+                { key: "inventory", credit: value },
+              ],
+      });
+    }
+  }
 }

@@ -2,22 +2,33 @@
 
 export type AccountType = "asset" | "liability" | "equity" | "income" | "expense";
 
-export const DEFAULT_ACCOUNTS: { code: string; name: string; type: AccountType; key: string }[] = [
+type AccountDef = { code: string; name: string; type: AccountType; key: string; countries?: ("IN" | "AE")[]; names?: Partial<Record<"IN" | "AE", string>> };
+
+/** Chart of accounts template. "countries" limits an account to some countries; "names" localises labels. */
+export const DEFAULT_ACCOUNTS: AccountDef[] = [
   { code: "1000", name: "Bank & cash", type: "asset", key: "bank" },
   { code: "1100", name: "Accounts receivable", type: "asset", key: "ar" },
   { code: "1200", name: "Inventory", type: "asset", key: "inventory" },
-  { code: "1300", name: "GST input credit", type: "asset", key: "gst_in" },
+  { code: "1300", name: "GST input credit", type: "asset", key: "gst_in", names: { AE: "VAT recoverable" } },
+  { code: "1400", name: "Employee loans & advances", type: "asset", key: "advances" },
   { code: "2000", name: "Accounts payable", type: "liability", key: "ap" },
-  { code: "2100", name: "GST payable", type: "liability", key: "gst_out" },
-  { code: "2200", name: "PF & ESI payable", type: "liability", key: "pf_payable" },
-  { code: "2300", name: "TDS payable", type: "liability", key: "tds_payable" },
-  { code: "2400", name: "Professional tax payable", type: "liability", key: "pt_payable" },
+  { code: "2100", name: "GST payable", type: "liability", key: "gst_out", names: { AE: "VAT payable" } },
+  { code: "2150", name: "Reimbursements payable", type: "liability", key: "reimb_payable" },
+  { code: "2200", name: "PF & ESI payable", type: "liability", key: "pf_payable", countries: ["IN"] },
+  { code: "2300", name: "TDS payable", type: "liability", key: "tds_payable", countries: ["IN"] },
+  { code: "2400", name: "Professional tax payable", type: "liability", key: "pt_payable", countries: ["IN"] },
+  { code: "2500", name: "Pension payable (GPSSA)", type: "liability", key: "pension_payable", countries: ["AE"] },
+  { code: "2600", name: "End-of-service gratuity provision", type: "liability", key: "gratuity_provision", names: { IN: "Gratuity provision" } },
+  { code: "2800", name: "Corporate tax payable", type: "liability", key: "ct_payable", countries: ["AE"] },
   { code: "3000", name: "Owner's equity", type: "equity", key: "equity" },
   { code: "4000", name: "Sales", type: "income", key: "sales" },
+  { code: "4050", name: "Sales returns & credit notes", type: "income", key: "sales_returns" },
   { code: "4900", name: "Other income", type: "income", key: "other_income" },
   { code: "5000", name: "Cost of goods sold", type: "expense", key: "cogs" },
+  { code: "5100", name: "Stock adjustments & write-offs", type: "expense", key: "stock_adjustments" },
   { code: "6000", name: "Salaries & wages", type: "expense", key: "salaries" },
-  { code: "6010", name: "Employer PF & ESI", type: "expense", key: "employer_contrib" },
+  { code: "6010", name: "Employer PF & ESI", type: "expense", key: "employer_contrib", names: { AE: "Employer pension (GPSSA)" } },
+  { code: "6020", name: "End-of-service benefits", type: "expense", key: "gratuity_expense" },
   { code: "6100", name: "Rent", type: "expense", key: "rent" },
   { code: "6200", name: "Software & subscriptions", type: "expense", key: "software" },
   { code: "6300", name: "Travel", type: "expense", key: "travel" },
@@ -26,8 +37,15 @@ export const DEFAULT_ACCOUNTS: { code: string; name: string; type: AccountType; 
   { code: "6600", name: "Utilities", type: "expense", key: "utilities" },
   { code: "6700", name: "Professional fees", type: "expense", key: "professional_fees" },
   { code: "6800", name: "Repairs & maintenance", type: "expense", key: "maintenance" },
+  { code: "6850", name: "Staff welfare & meals", type: "expense", key: "staff_welfare" },
   { code: "6900", name: "Other expenses", type: "expense", key: "other_expense" },
 ];
+
+/** Accounts for a country with localised names. */
+export function accountsForCountry(country: string | null | undefined) {
+  const c: "IN" | "AE" = country === "AE" ? "AE" : "IN";
+  return DEFAULT_ACCOUNTS.filter((a) => !a.countries || a.countries.includes(c)).map((a) => ({ ...a, name: a.names?.[c] ?? a.name }));
+}
 
 /** Categories a user can pick for a manual expense (value = account system key). */
 export const EXPENSE_CATEGORIES = [
@@ -39,6 +57,7 @@ export const EXPENSE_CATEGORIES = [
   { value: "utilities", label: "Utilities" },
   { value: "professional_fees", label: "Professional fees" },
   { value: "maintenance", label: "Repairs & maintenance" },
+  { value: "staff_welfare", label: "Staff welfare & meals" },
   { value: "other_expense", label: "Other expenses" },
 ] as const;
 
@@ -49,8 +68,10 @@ export const EXPENSE_CATEGORY_LABEL: Record<string, string> = {
   salaries: "Salaries & wages",
 };
 
-export const GST_RATES = [0, 5, 12, 18, 28] as const;
+/** @deprecated India-only; use countryPack(org.country).tax.rates. GST 2.0 slabs. */
+export const GST_RATES = [0, 3, 5, 18, 40] as const;
 
+/** @deprecated use countryPack(org.country).regions */
 export const INDIAN_STATES = [
   "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh", "Goa", "Gujarat", "Haryana", "Himachal Pradesh",
   "Jharkhand", "Karnataka", "Kerala", "Madhya Pradesh", "Maharashtra", "Manipur", "Meghalaya", "Mizoram", "Nagaland", "Odisha",
