@@ -1,11 +1,12 @@
 import Link from "next/link";
-import { BarChart3, CircleUserRound, CreditCard, LayoutGrid, LogOut, Settings2, ShieldCheck, UsersRound } from "lucide-react";
+import { BarChart3, CircleUserRound, CreditCard, History, LayoutGrid, LogOut, Settings2, ShieldCheck, UsersRound } from "lucide-react";
 import { logout } from "@/app/actions/auth";
 import { switchWorkspace } from "@/app/app/actions";
 import { Logo } from "@/components/logo";
 import { MODULES } from "@/lib/modules";
 import { canManage, roleCanUse, type ModuleKey } from "@/lib/roles";
-import { getWorkspace, planModules, type ActiveWorkspace } from "@/lib/tenancy";
+import { planDef } from "@/lib/plans";
+import { getWorkspace, hasFeature, planModules, type ActiveWorkspace } from "@/lib/tenancy";
 import { formatDate } from "@/lib/format";
 import { SearchTrigger } from "./command-palette";
 import { MobileNav, NavLinks, OrgSwitcher, type NavItem } from "./nav";
@@ -23,6 +24,7 @@ function buildNav(ws: ActiveWorkspace): { main: NavItem[]; modules: NavItem[]; s
     settings.push({ href: "/app/team", label: "Team & roles", icon: <UsersRound className="size-3.5" /> });
     settings.push({ href: "/app/billing", label: "Billing", icon: <CreditCard className="size-3.5" /> });
     settings.push({ href: "/app/settings", label: "Settings", icon: <Settings2 className="size-3.5" /> });
+    if (hasFeature(ws, "auditLog")) settings.push({ href: "/app/audit", label: "Audit log", icon: <History className="size-3.5" /> });
   }
   if (ws.isPlatformAdmin) settings.push({ href: "/admin", label: "Platform admin", icon: <ShieldCheck className="size-3.5" />, color: "bg-lime" });
   return {
@@ -55,7 +57,7 @@ function TrialChip({ ws }: { ws: ActiveWorkspace }) {
   if (a.state === "paid")
     return (
       <div className="rounded-xl border border-line bg-mint/60 p-3 text-xs font-medium">
-        {ws.org.plan === "growth" ? "Growth" : "Starter"} plan · active
+        {planDef(ws.org.plan).name} plan · active
       </div>
     );
   if (a.state === "past_due") return <div className="rounded-xl bg-butter p-3 text-xs font-medium">Payment failed — update card</div>;

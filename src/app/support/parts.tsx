@@ -5,17 +5,18 @@ import { eq } from "drizzle-orm";
 import { cache } from "react";
 import { LogoMark } from "@/components/logo";
 import { db, schema } from "@/db";
+import { orgEntitlements } from "@/lib/entitlements";
 
-/** Resolve a workspace by its public slug; 404 when unknown. Only id/name/slug are exposed. */
+/** Resolve a workspace by its public slug; 404 when unknown or when its plan/modules don't include the portal. Only id/name/slug are exposed. */
 export const getPortalOrg = cache(async (slug: string) => {
   if (!/^[a-z0-9-]{1,80}$/i.test(slug)) notFound();
   const [org] = await db
-    .select({ id: schema.organizations.id, name: schema.organizations.name, slug: schema.organizations.slug })
+    .select()
     .from(schema.organizations)
     .where(eq(schema.organizations.slug, slug.toLowerCase()))
     .limit(1);
-  if (!org) notFound();
-  return org;
+  if (!org || !orgEntitlements(org).allows("helpdesk", "supportPortal")) notFound();
+  return { id: org.id, name: org.name, slug: org.slug };
 });
 
 export function PortalShell({ org, children }: { org: { name: string; slug: string }; children: React.ReactNode }) {
