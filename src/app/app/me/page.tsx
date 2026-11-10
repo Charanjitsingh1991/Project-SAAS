@@ -6,11 +6,13 @@ import { ActionButton, ActionForm, Input, Select, SubmitButton } from "@/compone
 import { Badge, Card, EmptyState, PageHeader, Stat, StatusBadge, Table, Td, Th, type Tone } from "@/components/app/ui";
 import { db, schema } from "@/db";
 import { formatDate, formatMoney, formatPeriod, initials, todayYmd } from "@/lib/format";
+import { EXPENSE_CATEGORIES } from "@/lib/accounting";
+import { CLAIM_TONE, claimCategoryLabel, claimTaxOptions, myClaims } from "@/lib/claims";
 import { monthRange } from "@/lib/hrm";
 import { leaveBalances, resolveMyEmployee } from "@/lib/hrm-data";
-import { requireWorkspace } from "@/lib/tenancy";
+import { hasFeature, packFor, planModules, requireWorkspace, type ActiveWorkspace } from "@/lib/tenancy";
 import { MiniCalendar } from "../hrm/_components/mini-calendar";
-import { applyMyLeave, cancelMyLeave, checkIn, checkOut } from "./actions";
+import { applyMyLeave, cancelMyLeave, checkIn, checkOut, submitMyClaim, withdrawMyClaim } from "./actions";
 
 export const metadata: Metadata = { title: "My space" };
 
@@ -34,6 +36,7 @@ export default async function MySpacePage() {
 
   const today = todayYmd();
   const month = today.slice(0, 7);
+  const claimsOn = hasFeature(ws, "expenseClaims") && planModules(ws).includes("hrm");
   const { start, end } = monthRange(month);
 
   const [dept, manager, balances, requests, att, hols, slips] = await Promise.all([
@@ -248,6 +251,95 @@ export default async function MySpacePage() {
           )}
         </Card>
       </div>
+
+      {claimsOn && <MyClaims ws={ws} emp={emp} today={today} />}
     </>
+  );
+}
+
+async function MyClaims({ ws, emp, today }: { ws: ActiveWorkspace; emp: { id: number; userId: number | null }; today: string }) {
+  const cur = ws.org.currency;
+  if (emp.userId !== ws.user.id) {
+    return (
+      <Card title="Expense claims" className="mt-6">
+        <EmptyState title="Link your login to claim expenses">Ask HR to link your login ({ws.user.email}) to your employee record from the employee profile.</EmptyState>
+      </Card>
+    );
+  }
+  const pack = packFor(ws);
+  const payroll = planModules(ws).includes("payroll");
+  const claims = await myClaims(ws.org.id, emp.id);
+  return (
+    <div className="mt-6 grid gap-6 lg:grid-cols-2">
+      <Card title="Claim an expense" className="h-fit">
+        <ActionForm action={submitMyClaim} className="grid gap-3 sm:grid-cols-2">
+          <Input label="Date" name="date" type="date" defaultValue={today} max={today} />
+          <Select label="Category" name="category" placeholder="Select…" options={EXPENSE_CATEGORIES.map((c) => ({ value: c.value, label: c.label }))} className="[&_select]:normal-case" />
+          <Input label="Description" name="description" placeholder="Client lunch, taxi to airport…" className="sm:col-span-2" />
+          <Input label={`Amount before tax (${cur})`} name="amount" inputMode="decimal" placeholder="0.00" />
+          <Select label={`${pack.tax.name} on receipt`} name="tax" options={claimTaxOptions(pack)} defaultValue={pack.tax.defaultCode} className="[&_select]:normal-case" />
+          {payroll ? (
+            <Select
+              label="Reimburse"
+              name="reimburseVia"
+              options={[
+                { value: "payroll", label: "With my next salary" },
+                { value: "direct", label: "Bank transfer on approval" },
+              ]}
+              defaultValue="payroll"
+              className="sm:col-span-2 [&_select]:normal-case"
+            />
+          ) : (
+            <input type="hidden" name="reimburseVia" value="direct" />
+          )}
+          <div className="sm:col-span-2">
+            <SubmitButton>Submit claim</SubmitButton>
+          </div>
+        </ActionForm>
+      </Card>
+
+      <Card title="My claims">
+        {claims.length === 0 ? (
+          <EmptyState title="No claims yet">Submitted claims and their status appear here.</EmptyState>
+        ) : (
+          <Table compact>
+            <thead>
+              <tr>
+                <Th>Date</Th>
+                <Th>Expense</Th>
+                <Th className="text-right">Total</Th>
+                <Th>Status</Th>
+                <Th />
+              </tr>
+            </thead>
+            <tbody>
+              {claims.map((c) => (
+                <tr key={c.id} className="align-top">
+                  <Td className="whitespace-nowrap">{formatDate(c.date)}</Td>
+                  <Td>
+                    {c.description}
+                    <span className="block text-xs text-ink-mute">
+                      {claimCategoryLabel(c.category)} · via {c.reimburseVia}
+                    </span>
+                    {c.status === "rejected" && c.rejectionReason && <span className="block text-xs text-signal">{c.rejectionReason}</span>}
+                  </Td>
+                  <Td className="text-right tabular-nums">{formatMoney(c.total, cur)}</Td>
+                  <Td>
+                    <Badge tone={CLAIM_TONE[c.status]}>{c.status === "approved" && c.reimburseVia === "payroll" ? "in next payroll" : c.status}</Badge>
+                  </Td>
+                  <Td className="text-right">
+                    {c.status === "submitted" && (
+                      <ActionButton action={withdrawMyClaim} fields={{ id: c.id }} confirm="Withdraw this claim?">
+                        Withdraw
+                      </ActionButton>
+                    )}
+                  </Td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        )}
+      </Card>
+    </div>
   );
 }

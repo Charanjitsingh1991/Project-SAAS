@@ -6,11 +6,13 @@ import { ActionButton, ActionForm, Input, Select, SubmitButton } from "@/compone
 import { Badge, Card, EmptyState, PageHeader, StatusBadge, Table, Td, Th, type Tone } from "@/components/app/ui";
 import { db, schema } from "@/db";
 import { formatDate, formatMoney, todayYmd } from "@/lib/format";
-import { maskAccount, maskPan, monthRange, salaryStructure } from "@/lib/hrm";
+import { nationalityName, type CountryPack } from "@/lib/countries";
+import { expiryAlerts, expiryText, maskId, monthRange, parseSalaryComponents, salaryStructure } from "@/lib/hrm";
+import { uaeComponents } from "@/lib/payroll-ae";
 import { leaveBalances } from "@/lib/hrm-data";
-import { requireWorkspace } from "@/lib/tenancy";
+import { packFor, requireWorkspace } from "@/lib/tenancy";
 import { addTask, deleteTask, linkUser, markExited, reactivate, startNotice, toggleTask, updateEmployee } from "../actions";
-import { CompFields, JobFields, PersonalFields, StatutoryFields } from "../_components/employee-fields";
+import { CompFields, JobFields, PersonalFields, StatutoryFields, annualPayLabel } from "../_components/employee-fields";
 import { MiniCalendar } from "../_components/mini-calendar";
 
 export const metadata: Metadata = { title: "Employee" };
@@ -39,6 +41,9 @@ export default async function EmployeePage({ params, searchParams }: { params: P
   const today = todayYmd();
   const month = today.slice(0, 7);
   const cur = ws.org.currency;
+  const pack = packFor(ws);
+  const alerts = emp.status === "exited" ? [] : expiryAlerts(pack.hr.employeeFields, emp, today);
+  const masked = pack.hr.employeeFields.filter((f) => f.sensitive && emp[f.key]).map((f) => `${f.label} ${maskId(emp[f.key])}`);
 
   const [depts, people] = await Promise.all([
     db.select().from(schema.departments).where(eq(schema.departments.orgId, orgId)).orderBy(asc(schema.departments.name)),
@@ -66,9 +71,7 @@ export default async function EmployeePage({ params, searchParams }: { params: P
           <>
             <span className="font-mono text-xs">{emp.code}</span> · {emp.designation}
             {dept ? ` · ${dept.name}` : ""}
-            <span className="mt-1 block font-mono text-xs text-ink-mute">
-              PAN {maskPan(emp.pan)} · A/C {maskAccount(emp.bankAccount)}
-            </span>
+            {masked.length > 0 && <span className="mt-1 block font-mono text-xs text-ink-mute">{masked.join(" · ")}</span>}
           </>
         }
         actions={
@@ -79,6 +82,22 @@ export default async function EmployeePage({ params, searchParams }: { params: P
         tabs={TABS.map(([k, label]) => ({ href: `/app/hrm/${emp.id}?tab=${k}`, label, active: k === tab }))}
       />
 
+      {alerts.length > 0 && (
+        <div role="alert" className="mb-6 rounded-xl border border-signal/30 bg-signal/10 px-4 py-3 text-sm">
+          <p className="font-medium text-signal">Document renewal needed</p>
+          <ul className="mt-1 space-y-0.5 text-ink">
+            {alerts.map((a) => (
+              <li key={a.key}>
+                {expiryText(a)} ({formatDate(a.date)}).{" "}
+                <Link href={`/app/hrm/${emp.id}?tab=compensation`} className="underline">
+                  Update
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {tab === "overview" && (
         <div className="grid gap-6 lg:grid-cols-[1.4fr_1fr]">
           <div className="space-y-6">
@@ -86,7 +105,7 @@ export default async function EmployeePage({ params, searchParams }: { params: P
               <ActionForm action={updateEmployee} resetOnSuccess={false} className="space-y-4">
                 <input type="hidden" name="id" value={emp.id} />
                 <input type="hidden" name="section" value="personal" />
-                <PersonalFields e={emp} />
+                <PersonalFields e={emp} pack={pack} />
                 <SubmitButton>Save personal details</SubmitButton>
               </ActionForm>
             </Card>
@@ -99,7 +118,8 @@ export default async function EmployeePage({ params, searchParams }: { params: P
                 <Item label="Work location" value={emp.workLocation} />
                 <Item label="Joined" value={formatDate(emp.joinDate)} />
                 <Item label="Probation ends" value={emp.probationEndDate ? formatDate(emp.probationEndDate) : undefined} />
-                <Item label="Annual CTC" value={emp.annualCtc ? formatMoney(emp.annualCtc, cur) : undefined} />
+                <Item label={annualPayLabel(pack)} value={emp.annualCtc ? formatMoney(emp.annualCtc, cur) : undefined} />
+                {pack.code === "AE" && <Item label="Nationality" value={emp.nationality ? nationalityName(emp.nationality) : undefined} />}
               </dl>
             </Card>
           </div>
@@ -139,7 +159,7 @@ export default async function EmployeePage({ params, searchParams }: { params: P
         </Card>
       )}
 
-      {tab === "compensation" && <CompensationTab emp={emp} currency={cur} />}
+      {tab === "compensation" && <CompensationTab emp={emp} currency={cur} pack={pack} />}
       {tab === "leave" && <LeaveTab empId={emp.id} orgId={orgId} today={today} />}
       {tab === "attendance" && <AttendanceTab empId={emp.id} orgId={orgId} month={month} today={today} />}
       {tab === "onboarding" && <OnboardingTab empId={emp.id} orgId={orgId} />}
@@ -218,13 +238,31 @@ async function AccountLink({ empId, orgId, current }: { empId: number; orgId: nu
   );
 }
 
-function CompensationTab({ emp, currency }: { emp: typeof schema.employees.$inferSelect; currency: string }) {
+/** Country-correct monthly/annual lines: India via salaryStructure, UAE via the payroll engine's component split. */
+function structureLines(emp: typeof schema.employees.$inferSelect, pack: CountryPack) {
+  if (pack.code === "AE") {
+    const c = uaeComponents(emp.annualCtc, parseSalaryComponents(emp.salaryComponents), pack.payroll.defaultSplit);
+    const lines = pack.payroll.components.map((x) => {
+      const m = c[x.code as keyof typeof c] ?? 0;
+      return [x.label, m, m * 12] as const;
+    });
+    const monthly = lines.reduce((t, l) => t + l[1], 0);
+    return { lines, total: [monthly, monthly * 12] as const };
+  }
   const s = salaryStructure(emp.annualCtc, emp.metro);
-  const lines = [
-    ["Basic (50% of CTC)", s.monthly.basic, s.annual.basic],
-    [`HRA (${emp.metro ? 50 : 40}% of basic)`, s.monthly.hra, s.annual.hra],
-    ["Special allowance (balance)", s.monthly.special, s.annual.special],
-  ] as const;
+  return {
+    lines: [
+      ["Basic (50% of CTC)", s.monthly.basic, s.annual.basic],
+      [`HRA (${emp.metro ? 50 : 40}% of basic)`, s.monthly.hra, s.annual.hra],
+      ["Special allowance (balance)", s.monthly.special, s.annual.special],
+    ] as const,
+    total: [s.monthly.total, s.annual.total] as const,
+  };
+}
+
+function CompensationTab({ emp, currency, pack }: { emp: typeof schema.employees.$inferSelect; currency: string; pack: CountryPack }) {
+  const { lines, total } = structureLines(emp, pack);
+  const payLabel = annualPayLabel(pack);
   return (
     <div className="grid gap-6 lg:grid-cols-2">
       <div className="space-y-6">
@@ -232,9 +270,9 @@ function CompensationTab({ emp, currency }: { emp: typeof schema.employees.$infe
           <ActionForm action={updateEmployee} resetOnSuccess={false} className="space-y-4">
             <input type="hidden" name="id" value={emp.id} />
             <input type="hidden" name="section" value="compensation" />
-            <CompFields e={emp} />
-            <h3 className="pt-2 font-display text-sm font-semibold">Statutory & bank</h3>
-            <StatutoryFields e={emp} />
+            <CompFields e={emp} pack={pack} />
+            <h3 className="pt-2 font-display text-sm font-semibold">{pack.code === "AE" ? "Identity, visa & bank" : "Statutory & bank"}</h3>
+            <StatutoryFields e={emp} pack={pack} />
             <SubmitButton>Save compensation</SubmitButton>
           </ActionForm>
         </Card>
@@ -258,16 +296,18 @@ function CompensationTab({ emp, currency }: { emp: typeof schema.employees.$infe
                 </tr>
               ))}
               <tr className="font-semibold">
-                <Td>Total CTC</Td>
-                <Td className="text-right tabular-nums">{formatMoney(s.monthly.total, currency)}</Td>
-                <Td className="text-right tabular-nums">{formatMoney(s.annual.total, currency)}</Td>
+                <Td>{pack.code === "AE" ? "Total package" : "Total CTC"}</Td>
+                <Td className="text-right tabular-nums">{formatMoney(total[0], currency)}</Td>
+                <Td className="text-right tabular-nums">{formatMoney(total[1], currency)}</Td>
               </tr>
             </tbody>
           </Table>
         ) : (
-          <EmptyState title="No CTC set">Enter the annual CTC to preview the salary structure.</EmptyState>
+          <EmptyState title={`No ${payLabel.toLowerCase()} set`}>
+            {pack.code === "AE" ? "Enter the monthly salary components to preview the package." : "Enter the annual CTC to preview the salary structure."}
+          </EmptyState>
         )}
-        <p className="mt-8 text-xs text-ink-mute">Preview only — statutory deductions (PF, ESI, PT, TDS) are calculated in Payroll.</p>
+        <p className="mt-8 text-xs text-ink-mute">Preview only — calculated in Payroll. {pack.payroll.statutoryNote}</p>
       </Card>
     </div>
   );

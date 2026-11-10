@@ -8,6 +8,7 @@ import { db, schema } from "@/db";
 import { addDaysYmd, formatDate, todayYmd } from "@/lib/format";
 import { YM_RE, dayOfWeek, isValidYmd, isWeekend, monthRange, shiftMonth, summarizeAttendance } from "@/lib/hrm";
 import { unpaidLeaveByRequest } from "@/lib/hrm-data";
+import { weekendOf } from "@/lib/countries";
 import { requireWorkspace } from "@/lib/tenancy";
 import { cn } from "@/lib/utils";
 import { markAllPresent, saveAttendance } from "../attendance-actions";
@@ -32,7 +33,7 @@ export default async function AttendancePage({ searchParams }: { searchParams: P
       <PageHeader
         title="Attendance"
         description="Monthly register with loss-of-pay totals, and a daily view to mark attendance."
-        tabs={hrmTabs("attendance")}
+        tabs={hrmTabs(ws, "attendance")}
         actions={
           <div className="flex gap-1 text-sm">
             <Link href={`/app/hrm/attendance?month=${daily ? date.slice(0, 7) : month}`} className={cn("rounded-full border px-4 py-1.5", !daily ? "border-ink bg-ink text-paper" : "border-line hover:border-ink")}>
@@ -44,12 +45,12 @@ export default async function AttendancePage({ searchParams }: { searchParams: P
           </div>
         }
       />
-      {daily ? <Daily orgId={ws.org.id} date={date} today={today} /> : <Register orgId={ws.org.id} month={month} today={today} />}
+      {daily ? <Daily orgId={ws.org.id} weekend={weekendOf(ws.org)} date={date} today={today} /> : <Register orgId={ws.org.id} weekend={weekendOf(ws.org)} month={month} today={today} />}
     </>
   );
 }
 
-async function Register({ orgId, month, today }: { orgId: number; month: string; today: string }) {
+async function Register({ orgId, weekend, month, today }: { orgId: number; weekend: number[]; month: string; today: string }) {
   const { start, end, days } = monthRange(month);
   const [emps, rows, hols, unpaid] = await Promise.all([
     db.select().from(schema.employees).where(and(eq(schema.employees.orgId, orgId), lte(schema.employees.joinDate, end))).orderBy(asc(schema.employees.code)),
@@ -88,7 +89,7 @@ async function Register({ orgId, month, today }: { orgId: number; month: string;
               <tr>
                 <th className="sticky left-0 z-10 min-w-44 border-b border-line bg-card px-4 py-2 text-left font-mono text-[11px] font-normal tracking-widest text-ink-mute uppercase">Employee</th>
                 {dates.map((d) => (
-                  <th key={d} title={hmap.get(d)} className={cn("border-b border-line px-0 py-1 font-normal", (isWeekend(d) || hmap.has(d)) && "bg-ink/5", d === today && "text-signal")}>
+                  <th key={d} title={hmap.get(d)} className={cn("border-b border-line px-0 py-1 font-normal", (isWeekend(d, weekend) || hmap.has(d)) && "bg-ink/5", d === today && "text-signal")}>
                     <span className="block text-[9px] text-ink-mute">{WD[dayOfWeek(d)]}</span>
                     {Number(d.slice(8))}
                   </th>
@@ -112,7 +113,7 @@ async function Register({ orgId, month, today }: { orgId: number; month: string;
                     </td>
                     {dates.map((d) => {
                       const r = m.get(d);
-                      const off = isWeekend(d) || hmap.has(d);
+                      const off = isWeekend(d, weekend) || hmap.has(d);
                       const status = r?.status ?? (hmap.has(d) ? "holiday" : null);
                       return (
                         <td key={d} title={r ? `${r.status.replace("_", " ")}${r.checkIn ? ` · ${r.checkIn}–${r.checkOut ?? "…"}` : ""}` : hmap.get(d)} className={cn("h-8 min-w-7 border-b border-line/70", status ? ATT_BG[status] : off ? "bg-ink/5" : "")}>
@@ -144,7 +145,7 @@ async function Register({ orgId, month, today }: { orgId: number; month: string;
   );
 }
 
-async function Daily({ orgId, date, today }: { orgId: number; date: string; today: string }) {
+async function Daily({ orgId, weekend, date, today }: { orgId: number; weekend: number[]; date: string; today: string }) {
   const [emps, rows, hol] = await Promise.all([
     db.select().from(schema.employees).where(and(eq(schema.employees.orgId, orgId), lte(schema.employees.joinDate, date))).orderBy(asc(schema.employees.name)),
     db.select().from(schema.attendance).where(and(eq(schema.attendance.orgId, orgId), eq(schema.attendance.date, date))),
@@ -152,7 +153,7 @@ async function Daily({ orgId, date, today }: { orgId: number; date: string; toda
   ]);
   const people = emps.filter((e) => e.status !== "exited" || !e.exitDate || e.exitDate >= date);
   const byEmp = new Map(rows.map((r) => [r.employeeId, r]));
-  const off = isWeekend(date) ? "Weekend" : hol[0] ? `Holiday — ${hol[0].name}` : null;
+  const off = isWeekend(date, weekend) ? "Weekend" : hol[0] ? `Holiday — ${hol[0].name}` : null;
   const unmarked = people.filter((e) => e.status !== "exited" && !byEmp.has(e.id)).length;
   const nav = "rounded-full border border-line px-3 py-1 hover:border-ink";
   const link = (d: string) => `/app/hrm/attendance?view=day&date=${d}`;
