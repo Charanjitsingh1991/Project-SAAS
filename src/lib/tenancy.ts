@@ -1,0 +1,78 @@
+import "server-only";
+import { asc, eq } from "drizzle-orm";
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
+import { cache } from "react";
+import { db, schema } from "@/db";
+import type { Role } from "@/db/schema";
+import { getCurrentUser } from "./dal";
+import { PLAN_MODULES, canManage, roleCanUse, type ModuleKey } from "./roles";
+import { accessFor } from "./trial";
+
+export const ORG_COOKIE = "saas_org";
+
+export function isPlatformAdmin(email: string) {
+  const list = (process.env.ADMIN_EMAILS ?? "")
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+  return list.includes(email.toLowerCase());
+}
+
+/** Current user + active workspace for this request (deduped per render). */
+export const getWorkspace = cache(async () => {
+  const user = await getCurrentUser();
+  if (!user) return null;
+
+  const rows = await db
+    .select({ org: schema.organizations, role: schema.memberships.role })
+    .from(schema.memberships)
+    .innerJoin(schema.organizations, eq(schema.memberships.orgId, schema.organizations.id))
+    .where(eq(schema.memberships.userId, user.id))
+    .orderBy(asc(schema.memberships.createdAt));
+
+  const orgs = rows.map((r) => ({ id: r.org.id, name: r.org.name, role: r.role }));
+  const wanted = Number((await cookies()).get(ORG_COOKIE)?.value);
+  const pick = rows.find((r) => r.org.id === wanted) ?? rows[0];
+  const admin = isPlatformAdmin(user.email);
+
+  if (!pick) return { user, org: null, role: null, orgs, access: null, isPlatformAdmin: admin } as const;
+
+  const access = accessFor(pick.org);
+  return { user, org: pick.org, role: pick.role as Role, orgs, access, isPlatformAdmin: admin } as const;
+});
+
+export type Workspace = NonNullable<Awaited<ReturnType<typeof getWorkspace>>>;
+export type ActiveWorkspace = Workspace & { org: NonNullable<Workspace["org"]>; role: Role; access: NonNullable<Workspace["access"]> };
+
+/** Modules this workspace's plan includes (all of them during the free trial). */
+export function planModules(ws: ActiveWorkspace): ModuleKey[] {
+  return ws.access.state === "trial" ? PLAN_MODULES.growth : PLAN_MODULES[ws.org.plan];
+}
+
+export function canUseModule(ws: ActiveWorkspace, mod: ModuleKey) {
+  return roleCanUse(ws.role, mod) && planModules(ws).includes(mod);
+}
+
+/**
+ * Guard for every workspace page and server action.
+ * Redirects to login / setup / billing (when deactivated) / overview (no permission).
+ */
+export async function requireWorkspace(opts: { module?: ModuleKey; manage?: boolean; allowLocked?: boolean } = {}) {
+  const ws = await getWorkspace();
+  if (!ws) redirect("/login");
+  if (!ws.org || !ws.role || !ws.access) redirect("/app/setup");
+  const active = ws as ActiveWorkspace;
+
+  if (active.access.state === "locked" && !opts.allowLocked) redirect("/app/billing");
+  if (opts.manage && !canManage(active.role)) redirect("/app?denied=manage");
+  if (opts.module && !canUseModule(active, opts.module)) redirect(`/app?denied=${opts.module}`);
+  return active;
+}
+
+export async function requirePlatformAdmin() {
+  const ws = await getWorkspace();
+  if (!ws) redirect("/login");
+  if (!ws.isPlatformAdmin) redirect("/app");
+  return ws;
+}
