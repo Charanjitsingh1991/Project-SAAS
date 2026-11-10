@@ -1,8 +1,10 @@
 import "server-only";
+import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { STAGE_PROBABILITY, type DealStage } from "@/db/schema";
 import type { Ctx } from "@/lib/activity";
 import { logActivity } from "@/lib/activity";
+import { packOf, type CountryCode } from "@/lib/countries";
 import { addDaysYmd, todayYmd } from "@/lib/format";
 import { onDealWon } from "@/lib/posting";
 
@@ -11,9 +13,13 @@ type Lifecycle = "lead" | "prospect" | "customer" | "churned";
 
 const DAY = 86_400_000;
 const ago = (days: number) => new Date(Date.now() - days * DAY);
-const lakh = (n: number) => Math.round(n * 100_000 * 100);
+/** Deal sizes are authored in lakh (India); UAE deals use AED 15,000 per authored unit. Minor units out. */
+const DEAL_UNIT: Record<CountryCode, number> = { IN: 100_000, AE: 15_000 };
 
-const COMPANIES = [
+type CompanySeed = { name: string; industry: string; gstin: string | null; city: string; state: string; country: string; website: string; phone: string };
+
+// Indices are referenced by CONTACTS, DEALS and ACTIVITIES, so both countries keep the same order and industries.
+const COMPANIES_IN: CompanySeed[] = [
   { name: "Tata Elxsi Labs", industry: "Engineering services", gstin: "29AABCT1234F1Z5", city: "Bengaluru", state: "Karnataka", country: "India", website: "tataelxsi.example", phone: "+91 80 4000 1100" },
   { name: "Reliance Retail Ventures", industry: "Retail", gstin: "27AAACR5055K1ZK", city: "Mumbai", state: "Maharashtra", country: "India", website: "relretail.example", phone: "+91 22 3555 0100" },
   { name: "Infosys BPM", industry: "IT services", gstin: "29AAACI4798L1Z9", city: "Bengaluru", state: "Karnataka", country: "India", website: "infosysbpm.example", phone: "+91 80 2852 0261" },
@@ -25,8 +31,23 @@ const COMPANIES = [
   { name: "Kaveri Hospitals", industry: "Healthcare", gstin: "36AABCK9087Q1Z3", city: "Hyderabad", state: "Telangana", country: "India", website: "kaverihospitals.example", phone: "+91 40 6600 3300" },
 ];
 
+const UAE = "United Arab Emirates";
+const COMPANIES_AE: CompanySeed[] = [
+  { name: "Emirates Engineering Labs", industry: "Engineering services", gstin: "100234567800003", city: "Dubai Silicon Oasis", state: "Dubai", country: UAE, website: "emirateseng.example", phone: "+971 4 501 1100" },
+  { name: "Gulf Retail Ventures", industry: "Retail", gstin: "100345678900003", city: "Dubai", state: "Dubai", country: UAE, website: "gulfretail.example", phone: "+971 4 355 0100" },
+  { name: "Falcon IT Services", industry: "IT services", gstin: "100456789000003", city: "Abu Dhabi", state: "Abu Dhabi", country: UAE, website: "falconit.example", phone: "+971 2 652 0261" },
+  { name: "Al Noor Textiles", industry: "Manufacturing", gstin: "100567890100003", city: "Sharjah", state: "Sharjah", country: UAE, website: "alnoortex.example", phone: "+971 6 540 2200" },
+  { name: "Jebel Ali Logistics", industry: "Logistics", gstin: "100678901200003", city: "Jebel Ali", state: "Dubai", country: UAE, website: "jafzalogistics.example", phone: "+971 4 810 7788" },
+  { name: "Oasis Organics", industry: "Food & beverage", gstin: "100789012300003", city: "Ras Al Khaimah", state: "Ras Al Khaimah", country: UAE, website: "oasisorganics.example", phone: "+971 7 233 1234" },
+  { name: "Northwind Traders", industry: "Wholesale", gstin: null, city: "Seattle", state: "Washington", country: "USA", website: "northwind.example", phone: "+1 206 555 0148" },
+  { name: "Atlas Fintech Pte Ltd", industry: "Financial services", gstin: null, city: "Singapore", state: "Singapore", country: "Singapore", website: "atlasfintech.example", phone: "+65 6123 4567" },
+  { name: "Corniche Medical Centre", industry: "Healthcare", gstin: "100890123400003", city: "Abu Dhabi", state: "Abu Dhabi", country: UAE, website: "corniche-medical.example", phone: "+971 2 610 3300" },
+];
+
+type ContactSeed = [number, string, string, Lifecycle, Source, boolean];
+
 // [companyIdx, name, title, lifecycle, source, hasPhone]
-const CONTACTS: [number, string, string, Lifecycle, Source, boolean][] = [
+const CONTACTS_IN: ContactSeed[] = [
   [0, "Anita Rao", "VP Engineering", "customer", "referral", true],
   [0, "Vikram Nair", "Procurement Lead", "prospect", "referral", true],
   [1, "Meera Kapoor", "Head of Digital", "customer", "event", true],
@@ -47,6 +68,40 @@ const CONTACTS: [number, string, string, Lifecycle, Source, boolean][] = [
   [8, "Fatima Sheikh", "IT Head", "lead", "website", true],
   [-1, "Rahul Verma", "Independent consultant", "lead", "website", false],
 ];
+
+const CONTACTS_AE: ContactSeed[] = [
+  [0, "Khalid Al Suwaidi", "VP Engineering", "customer", "referral", true],
+  [0, "Ravi Menon", "Procurement Lead", "prospect", "referral", true],
+  [1, "Layla Haddad", "Head of Digital", "customer", "event", true],
+  [1, "Imran Qureshi", "IT Manager", "prospect", "outbound", false],
+  [2, "Saeed Al Dhaheri", "CTO", "customer", "website", true],
+  [2, "Anna Kowalski", "Finance Controller", "prospect", "website", true],
+  [3, "Tariq Mahmood", "Managing Director", "customer", "partner", true],
+  [3, "Joy Dela Cruz", "Operations Head", "lead", "outbound", false],
+  [4, "Hassan Farouk", "COO", "prospect", "event", true],
+  [4, "Aisha Al Marri", "Supply Chain Manager", "lead", "website", true],
+  [5, "Noura Al Qasimi", "Founder", "customer", "referral", true],
+  [5, "Vikram Shetty", "Finance Head", "lead", "other", false],
+  [6, "Jordan Ellis", "Director of IT", "prospect", "partner", true],
+  [6, "Sam Whitaker", "Buyer", "lead", "outbound", false],
+  [7, "Wei Lim", "Head of Operations", "prospect", "event", true],
+  [7, "Priya Raman", "Product Manager", "churned", "website", false],
+  [8, "Dr. Hamad Al Nuaimi", "Administrator", "prospect", "referral", true],
+  [8, "Sana Iqbal", "IT Head", "lead", "website", true],
+  [-1, "George Abboud", "Independent consultant", "lead", "website", false],
+];
+
+const COMPANIES_BY: Record<CountryCode, CompanySeed[]> = { IN: COMPANIES_IN, AE: COMPANIES_AE };
+const CONTACTS_BY: Record<CountryCode, ContactSeed[]> = { IN: CONTACTS_IN, AE: CONTACTS_AE };
+/** The contact kept without an email (exercises the "missing email" states). */
+const NO_EMAIL_CONTACT = 11;
+const UAE_MOBILE_PREFIX = ["50", "52", "54", "55", "56", "58"];
+
+function contactPhone(code: CountryCode, n: number) {
+  const digits = String(10000000 + n * 137731).slice(0, 8);
+  if (code === "IN") return `+91 98${digits}`;
+  return `+971 ${UAE_MOBILE_PREFIX[n % UAE_MOBILE_PREFIX.length]} ${digits.slice(1, 4)} ${digits.slice(4, 8)}`;
+}
 
 type DealSeed = {
   title: string;
@@ -85,6 +140,12 @@ const DEALS: DealSeed[] = [
 export async function seedCrm(ctx: Ctx): Promise<void> {
   const owner = ctx.userId;
   const today = todayYmd();
+  const [org] = await db.select({ country: schema.organizations.country }).from(schema.organizations).where(eq(schema.organizations.id, ctx.orgId)).limit(1);
+  const code = packOf(org ?? {}).code;
+  const COMPANIES = COMPANIES_BY[code];
+  const CONTACTS = CONTACTS_BY[code];
+  const dealValue = (n: number) => Math.round(n * DEAL_UNIT[code] * 100);
+  const firstName = (ci: number) => CONTACTS[ci][1].split(" ")[0];
 
   const companyIds: number[] = [];
   for (const c of COMPANIES) {
@@ -118,8 +179,8 @@ export async function seedCrm(ctx: Ctx): Promise<void> {
         companyId: ci >= 0 ? companyIds[ci] : null,
         name,
         title,
-        email: name === "Amit Patel" ? null : `${slug}@${domain}`,
-        phone: phone ? `+91 98${String(10000000 + contactIds.length * 137731).slice(0, 8)}` : null,
+        email: contactIds.length === NO_EMAIL_CONTACT ? null : `${slug}@${domain}`,
+        phone: phone ? contactPhone(code, contactIds.length) : null,
         ownerId: owner,
         lifecycle,
         source,
@@ -141,7 +202,7 @@ export async function seedCrm(ctx: Ctx): Promise<void> {
         companyId: companyIds[d.company],
         contactId: contactIds[d.contact],
         ownerId: owner,
-        value: lakh(d.value),
+        value: dealValue(d.value),
         stage: d.stage,
         probability: STAGE_PROBABILITY[d.stage],
         source: d.source,
@@ -170,10 +231,10 @@ export async function seedCrm(ctx: Ctx): Promise<void> {
     [5, 14, "call", "Intro call — compliance requirements", "Needs MAS audit trail.", null, true, 6],
     [5, 14, "task", "Prepare payments dashboard mock-up", null, 5, false, 3],
     [6, 12, "meeting", "Supplier portal requirements workshop", "Two-hour session, 14 attendees.", null, true, 12],
-    [6, 12, "task", "Send proposal revision to Jordan", null, 0, false, 2],
+    [6, 12, "task", `Send proposal revision to ${firstName(12)}`, null, 0, false, 2],
     [7, 5, "note", "Finance team worried about migration downtime", "Offer a weekend cutover plan.", null, true, 20],
     [7, 5, "task", "Follow up — proposal stuck for 5 weeks", null, -6, false, 15],
-    [8, 11, "task", "Chase Amit for budget approval", null, -9, false, 14],
+    [8, 11, "task", `Chase ${firstName(11)} for budget approval`, null, -9, false, 14],
     [9, 16, "meeting", "Negotiation meeting with hospital board", "Board wants 3-year support pricing.", null, true, 3],
     [9, 16, "task", "Send final contract draft", null, 1, false, 2],
     [9, 16, "email", "Pricing breakdown shared", null, null, true, 1],
@@ -185,7 +246,7 @@ export async function seedCrm(ctx: Ctx): Promise<void> {
     [13, 4, "call", "Go-live checklist review", null, null, true, 40],
     [14, 2, "email", "Welcome pack sent", null, null, true, 10],
     [0, 9, "task", "Qualify inbound lead", null, 0, false, 1],
-    [1, 3, "task", "Re-engage Rohan — no reply in a month", null, -1, false, 5],
+    [1, 3, "task", `Re-engage ${firstName(3)} — no reply in a month`, null, -1, false, 5],
     [16, 10, "note", "Lost on price; revisit in 6 months", null, null, true, 28],
     [-1, 18, "call", "Cold call — independent consultant", "Interested in a reseller arrangement.", 4, false, 1],
   ];
