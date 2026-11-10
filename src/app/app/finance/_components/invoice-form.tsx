@@ -4,10 +4,10 @@ import { useState } from "react";
 import { ActionForm, Input, Select, SubmitButton, Textarea } from "@/components/app/forms";
 import { Card } from "@/components/app/ui";
 import { InvoiceLinesEditor, type EditorLine, type EditorProduct } from "@/components/app/invoice-lines-editor";
-import { INDIAN_STATES } from "@/lib/accounting";
+import { countryPack } from "@/lib/countries";
 import type { FormState } from "@/lib/definitions";
 
-export type CustomerOption = { id: number; name: string; gstin: string; address: string; state: string; email: string };
+export type CustomerOption = { id: number; name: string; taxId: string; address: string; region: string; email: string };
 
 export type InvoiceFormValues = {
   id?: number;
@@ -29,15 +29,23 @@ export function InvoiceForm({
   customers,
   products,
   currency,
+  country,
   cancelHref,
+  extra,
+  submitLabel,
 }: {
   action: (state: FormState, formData: FormData) => Promise<FormState>;
   values: InvoiceFormValues;
   customers: CustomerOption[];
   products: EditorProduct[];
   currency: string;
+  country: string;
   cancelHref: string;
+  /** Extra cards rendered before the submit button (e.g. a recurring schedule). */
+  extra?: React.ReactNode;
+  submitLabel?: string;
 }) {
+  const pack = countryPack(country);
   const [companyId, setCompanyId] = useState(values.companyId ? String(values.companyId) : "");
   const [name, setName] = useState(values.customerName);
   const [email, setEmail] = useState(values.customerEmail);
@@ -53,9 +61,9 @@ export function InvoiceForm({
     const c = customers.find((x) => String(x.id) === v);
     if (!c) return;
     setName(c.name);
-    setGstin(c.gstin);
+    setGstin(c.taxId);
     setAddress(c.address);
-    setState(c.state);
+    setState(c.region);
     if (c.email) setEmail(c.email);
   };
 
@@ -74,13 +82,20 @@ export function InvoiceForm({
           />
           <Input label="Customer name" name="customerName" value={name} onChange={(e) => setName(e.target.value)} required />
           <Input label="Customer email" name="customerEmail" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
-          <Input label="Customer GSTIN" name="customerGstin" value={gstin} onChange={(e) => setGstin(e.target.value)} className="[&_input]:uppercase" />
+          <Input
+            label={`Customer ${pack.tax.idLabel} (optional)`}
+            name="customerGstin"
+            value={gstin}
+            onChange={(e) => setGstin(e.target.value)}
+            placeholder={pack.tax.idExample}
+            className="[&_input]:uppercase"
+          />
           <Textarea label="Billing address" name="billingAddress" value={address} onChange={(e) => setAddress(e.target.value)} />
           <Select
-            label="Place of supply"
+            label={`Place of supply (${pack.regionLabel.toLowerCase()})`}
             name="placeOfSupply"
-            placeholder="— Select state —"
-            options={INDIAN_STATES.map((s) => ({ value: s, label: s }))}
+            placeholder={`— Select ${pack.regionLabel.toLowerCase()} —`}
+            options={pack.regions.map((s) => ({ value: s, label: s }))}
             value={state}
             onChange={(e) => setState(e.target.value)}
           />
@@ -90,15 +105,17 @@ export function InvoiceForm({
       </Card>
 
       <Card title="Line items">
-        <InvoiceLinesEditor products={products} initial={values.lines} currency={currency} />
+        <InvoiceLinesEditor products={products} initial={values.lines} currency={currency} country={country} />
       </Card>
 
       <Card title="Notes">
         <Textarea label="Notes / payment terms (shown on the invoice)" name="notes" value={notes} onChange={(e) => setNotes(e.target.value)} />
       </Card>
 
+      {extra}
+
       <div className="flex items-center gap-3">
-        <SubmitButton>{values.id ? "Save changes" : "Save draft"}</SubmitButton>
+        <SubmitButton>{submitLabel ?? (values.id ? "Save changes" : "Save draft")}</SubmitButton>
         <a href={cancelHref} className="text-sm text-ink-soft hover:text-ink">
           Cancel
         </a>

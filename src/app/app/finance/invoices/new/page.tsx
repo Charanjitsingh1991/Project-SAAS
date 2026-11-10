@@ -22,6 +22,7 @@ export default async function NewInvoicePage() {
         customers={customers}
         products={products}
         currency={ws.org.currency}
+        country={ws.org.country}
         cancelHref="/app/finance/invoices"
         values={{
           companyId: null,
