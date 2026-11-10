@@ -1,109 +1,100 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, gte, ne, sql } from "drizzle-orm";
 import { ActionForm, Input, SubmitButton } from "@/components/app/forms";
 import { Card, EmptyState, PageHeader, Stat, StatusBadge, Table, Td, Th } from "@/components/app/ui";
 import { db, schema } from "@/db";
-import { formatMoney, todayYmd } from "@/lib/format";
+import { formatMoney, formatPeriod, todayYmd } from "@/lib/format";
 import { requireWorkspace } from "@/lib/tenancy";
-import { runPayroll } from "./actions";
+import { createRun } from "./actions";
 
 export const metadata: Metadata = { title: "Payroll" };
-
-function monthLabel(period: string) {
-  return new Date(`${period}-01T00:00:00Z`).toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
-}
 
 export default async function PayrollPage() {
   const ws = await requireWorkspace({ module: "payroll" });
   const orgId = ws.org.id;
   const cur = ws.org.currency;
-  const thisMonth = todayYmd().slice(0, 7);
-  const year = thisMonth.slice(0, 4);
+  const today = todayYmd();
+  const month = today.slice(0, 7);
+  const year = Number(today.slice(0, 4));
+  const fyStart = `${Number(month.slice(5)) >= 4 ? year : year - 1}-04`;
 
-  const [runs, [emp]] = await Promise.all([
+  const [runs, active, ytd] = await Promise.all([
     db.select().from(schema.payrollRuns).where(eq(schema.payrollRuns.orgId, orgId)).orderBy(desc(schema.payrollRuns.period)),
     db
-      .select({
-        active: sql<number>`count(*)`,
-        gross: sql<number>`coalesce(sum(${schema.employees.monthlySalary}), 0)`,
-      })
+      .select({ n: sql<number>`count(*)`, ctc: sql<number>`coalesce(sum(${schema.employees.annualCtc}), 0)` })
       .from(schema.employees)
-      .where(sql`${schema.employees.orgId} = ${orgId} and ${schema.employees.status} = 'active'`),
+      .where(and(eq(schema.employees.orgId, orgId), ne(schema.employees.status, "exited"), sql`${schema.employees.annualCtc} > 0`)),
+    db
+      .select({ v: sql<number>`coalesce(sum(${schema.payrollRuns.totalNet}), 0)` })
+      .from(schema.payrollRuns)
+      .where(and(eq(schema.payrollRuns.orgId, orgId), eq(schema.payrollRuns.status, "paid"), gte(schema.payrollRuns.period, fyStart))),
   ]);
 
-  const last = runs[0];
-  const paidYtd = runs
-    .filter((r) => r.status === "paid" && r.period.startsWith(year))
-    .reduce((s, r) => s + r.totalNet, 0);
+  const monthlyCost = Math.round(Number(active[0]?.ctc ?? 0) / 12);
+  const last = runs.find((r) => r.status !== "draft") ?? runs[0];
 
   return (
     <>
-      <PageHeader title="Payroll" description="Run monthly payroll from your employee directory and review payslips." />
+      <PageHeader title="Payroll" description="Monthly runs with proration, LOP, PF, ESI, professional tax and TDS — draft, approve, then pay." />
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label="Active employees" value={emp?.active ?? 0} tone="mint" />
-        <Stat label="Monthly gross" value={formatMoney(emp?.gross ?? 0, cur)} tone="lime" />
-        <Stat
-          label="Last run net"
-          value={last ? formatMoney(last.totalNet, cur) : "—"}
-          hint={last ? monthLabel(last.period) : "No runs yet"}
-          tone="sky"
-        />
-        <Stat label={`Paid in ${year}`} value={formatMoney(paidYtd, cur)} tone="butter" />
+      <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <Stat label="Monthly payroll cost" value={formatMoney(monthlyCost, cur)} hint="Sum of active CTC ÷ 12" tone="mint" />
+        <Stat label="Last run net" value={last ? formatMoney(last.totalNet, cur) : "—"} hint={last ? formatPeriod(last.period) : "No runs yet"} tone="sky" />
+        <Stat label="Paid this fiscal year" value={formatMoney(Number(ytd[0]?.v ?? 0), cur)} hint={`Net paid since Apr ${fyStart.slice(0, 4)}`} tone="butter" />
+        <Stat label="Employees on payroll" value={Number(active[0]?.n ?? 0)} hint="Active with a CTC" tone="lilac" />
       </div>
 
-      <div className="mt-6 grid gap-6 xl:grid-cols-[1fr_340px]">
-        <Card title={`Payroll runs (${runs.length})`}>
-          {runs.length === 0 ? (
-            <EmptyState title="No payroll runs yet">Run payroll for the current month to generate payslips.</EmptyState>
-          ) : (
-            <Table>
-              <thead>
-                <tr>
-                  <Th>Period</Th>
-                  <Th className="text-right">Employees</Th>
-                  <Th className="text-right">Gross</Th>
-                  <Th className="text-right">Deductions</Th>
-                  <Th className="text-right">Net</Th>
-                  <Th>Status</Th>
-                  <Th />
+      <Card title="Run payroll" className="mb-6">
+        <ActionForm action={createRun} className="flex flex-wrap items-start gap-3" resetOnSuccess={false}>
+          <Input label="Period" name="period" type="month" defaultValue={month} required className="w-52" />
+          <div className="pt-[22px]">
+            <SubmitButton>Create draft run</SubmitButton>
+          </div>
+        </ActionForm>
+        <p className="mt-3 text-sm text-ink-soft">Includes everyone who joined on or before month end and hasn&apos;t exited before month start. Attendance and unpaid leave drive LOP.</p>
+      </Card>
+
+      <Card title="Payroll runs">
+        {runs.length === 0 ? (
+          <EmptyState title="No payroll runs yet">Create your first run above.</EmptyState>
+        ) : (
+          <Table>
+            <thead>
+              <tr>
+                <Th>Period</Th>
+                <Th>Status</Th>
+                <Th className="text-right">Employees</Th>
+                <Th className="text-right">Gross</Th>
+                <Th className="text-right">Deductions</Th>
+                <Th className="text-right">Net</Th>
+                <Th className="text-right">Employer cost</Th>
+                <Th />
+              </tr>
+            </thead>
+            <tbody>
+              {runs.map((r) => (
+                <tr key={r.id}>
+                  <Td className="font-medium">{formatPeriod(r.period)}</Td>
+                  <Td>
+                    <StatusBadge value={r.status} />
+                  </Td>
+                  <Td className="text-right tabular-nums">{r.employeeCount}</Td>
+                  <Td className="text-right tabular-nums">{formatMoney(r.totalGross, cur)}</Td>
+                  <Td className="text-right tabular-nums">{formatMoney(r.totalDeductions, cur)}</Td>
+                  <Td className="text-right font-medium tabular-nums">{formatMoney(r.totalNet, cur)}</Td>
+                  <Td className="text-right tabular-nums">{formatMoney(r.totalEmployerCost, cur)}</Td>
+                  <Td className="text-right">
+                    <Link href={`/app/payroll/${r.id}`} className="text-sm font-medium underline-offset-4 hover:underline">
+                      Open
+                    </Link>
+                  </Td>
                 </tr>
-              </thead>
-              <tbody>
-                {runs.map((r) => (
-                  <tr key={r.id}>
-                    <Td className="font-medium">{monthLabel(r.period)}</Td>
-                    <Td className="text-right tabular-nums">{r.employeeCount}</Td>
-                    <Td className="text-right tabular-nums">{formatMoney(r.totalGross, cur)}</Td>
-                    <Td className="text-right tabular-nums">{formatMoney(r.totalDeductions, cur)}</Td>
-                    <Td className="text-right tabular-nums">{formatMoney(r.totalNet, cur)}</Td>
-                    <Td>
-                      <StatusBadge value={r.status} />
-                    </Td>
-                    <Td>
-                      <Link href={`/app/payroll/${r.id}`} className="text-sm font-medium underline-offset-4 hover:underline">
-                        View payslips →
-                      </Link>
-                    </Td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
-          )}
-        </Card>
-
-        <Card title="Run payroll" className="self-start">
-          <ActionForm action={runPayroll} className="space-y-3" resetOnSuccess={false}>
-            <Input label="Pay period" name="period" type="month" defaultValue={thisMonth} />
-            <p className="text-xs text-ink-soft">
-              Every active employee is paid their monthly salary. Deductions: PF 12%, professional tax 200 when gross is above
-              15,000, and TDS 10% when gross is above 50,000.
-            </p>
-            <SubmitButton className="w-full">Run payroll</SubmitButton>
-          </ActionForm>
-        </Card>
-      </div>
+              ))}
+            </tbody>
+          </Table>
+        )}
+      </Card>
     </>
   );
 }
