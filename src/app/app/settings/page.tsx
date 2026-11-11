@@ -42,7 +42,7 @@ export default async function SettingsPage() {
     <>
       <PageHeader
         title="Settings"
-        description={`${pack.flag} ${pack.name} workspace · ${pack.currency} · ${pack.tax.name} · ${plan.name} plan${ws.access.state === "trial" ? " (trial)" : ""}`}
+        description={`${pack.flag} ${pack.name} workspace · ${pack.currency} · ${pack.tax.name} · ${plan.name} plan${ws.access.state === "trial" ? " (trial)" : ws.access.state === "comped" ? " (free access)" : ""}`}
       />
 
       <div className="grid gap-6 xl:grid-cols-[1fr_400px]">

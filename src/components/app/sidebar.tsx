@@ -57,6 +57,12 @@ function TrialChip({ ws }: { ws: ActiveWorkspace }) {
       </Link>
     );
   }
+  if (a.state === "comped")
+    return (
+      <div className="rounded-xl border border-line bg-lime/60 p-3 text-xs font-medium">
+        {planDef(ws.org.plan).name} plan · free access
+      </div>
+    );
   if (a.state === "paid")
     return (
       <div className="rounded-xl border border-line bg-mint/60 p-3 text-xs font-medium">

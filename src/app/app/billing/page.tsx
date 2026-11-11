@@ -107,6 +107,14 @@ export default async function BillingPage(props: PageProps<"/app/billing">) {
               </p>
             </div>
           )}
+          {access.state === "comped" && (
+            <div className="space-y-1">
+              <p className="font-display text-2xl font-semibold">
+                {PLANS[org.plan].name} plan <Badge tone="lime">free access</Badge>
+              </p>
+              <p className="text-sm text-ink-soft">Granted by saasmodels.tech. No trial limit and nothing to pay.</p>
+            </div>
+          )}
           {access.state === "paid" && (
             <div className="space-y-1">
               <p className="font-display text-2xl font-semibold">
@@ -158,7 +166,7 @@ export default async function BillingPage(props: PageProps<"/app/billing">) {
               </div>
             </div>
           ) : (
-            <p className="text-sm text-ink-soft">No payment method on file yet. Pick a plan below to add one through Stripe&apos;s secure checkout.</p>
+            <p className="text-sm text-ink-soft">{access.state === "comped" ? "No payment method needed." : <>No payment method on file yet. Pick a plan below to add one through Stripe&apos;s secure checkout.</>}</p>
           )}
           {manager && org.stripeCustomerId && (
             <p className="mt-4 text-xs text-ink-mute">Change card, switch plans, download invoices or cancel from &ldquo;Manage billing&rdquo;.</p>
@@ -166,7 +174,7 @@ export default async function BillingPage(props: PageProps<"/app/billing">) {
         </Card>
       </div>
 
-      {manager && !subscribed && (
+      {manager && !subscribed && access.state !== "comped" && (
         <>
           <h2 className="mt-10 mb-4 font-display text-xl font-semibold">Choose a plan</h2>
           {!configured && (

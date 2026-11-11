@@ -38,3 +38,23 @@ export async function expireTrial(fd: FormData) {
     .where(eq(schema.organizations.id, Number(fd.get("orgId"))));
   refresh();
 }
+
+/** Free Enterprise access with no trial or billing (partners, demos, internal workspaces). */
+export async function grantFreeAccess(fd: FormData) {
+  await requirePlatformAdmin();
+  await db
+    .update(schema.organizations)
+    .set({ compedAt: new Date(), plan: "enterprise" })
+    .where(eq(schema.organizations.id, Number(fd.get("orgId"))));
+  refresh();
+}
+
+/** Back to normal billing on Growth; if the trial date has passed the workspace locks until it pays. */
+export async function revokeFreeAccess(fd: FormData) {
+  await requirePlatformAdmin();
+  await db
+    .update(schema.organizations)
+    .set({ compedAt: null, plan: "growth" })
+    .where(eq(schema.organizations.id, Number(fd.get("orgId"))));
+  refresh();
+}
