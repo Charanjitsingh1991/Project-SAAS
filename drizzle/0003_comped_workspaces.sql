@@ -1,0 +1,1 @@
+ALTER TABLE `organizations` ADD `comped_at` integer;

@@ -1,5 +1,5 @@
 import "server-only";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { cache } from "react";
@@ -23,10 +23,21 @@ export function isPlatformAdmin(email: string) {
   return list.includes(email.toLowerCase());
 }
 
+/** Gives every workspace owned by `userId` free Enterprise access. */
+export async function compOwnedWorkspaces(userId: number) {
+  await db
+    .update(schema.organizations)
+    .set({ compedAt: new Date(), plan: "enterprise" })
+    .where(and(eq(schema.organizations.ownerId, userId), isNull(schema.organizations.compedAt)));
+}
+
 /** Current user + active workspace for this request (deduped per render). */
 export const getWorkspace = cache(async () => {
   const user = await getCurrentUser();
   if (!user) return null;
+  const admin = isPlatformAdmin(user.email);
+  // Platform admins run their own workspaces free, on Enterprise, without a trial (no-op once applied).
+  if (admin) await compOwnedWorkspaces(user.id);
 
   const rows = await db
     .select({ org: schema.organizations, role: schema.memberships.role })
@@ -38,7 +49,6 @@ export const getWorkspace = cache(async () => {
   const orgs = rows.map((r) => ({ id: r.org.id, name: r.org.name, role: r.role }));
   const wanted = Number((await cookies()).get(ORG_COOKIE)?.value);
   const pick = rows.find((r) => r.org.id === wanted) ?? rows[0];
-  const admin = isPlatformAdmin(user.email);
 
   if (!pick) return { user, org: null, role: null, orgs, access: null, isPlatformAdmin: admin } as const;
 

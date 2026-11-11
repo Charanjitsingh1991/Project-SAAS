@@ -62,6 +62,7 @@ export function trialEndFor(start: Date, tz = appTimeZone()) {
 }
 
 export type AccessState =
+  | { state: "comped" }
   | { state: "paid"; status: string }
   | { state: "past_due" }
   | { state: "trial"; day: number; daysLeft: number; lastDay: boolean; endsAt: Date }
@@ -73,9 +74,11 @@ type BillingFields = {
   subscriptionStatus: string | null;
   stripeSubscriptionId: string | null;
   currentPeriodEnd: Date | null;
+  compedAt?: Date | null;
 };
 
 export function accessFor(org: BillingFields, now = new Date(), tz = appTimeZone()): AccessState {
+  if (org.compedAt) return { state: "comped" };
   const sub = org.stripeSubscriptionId ? org.subscriptionStatus : null;
   if (sub === "active" || sub === "trialing") return { state: "paid", status: sub };
   if (sub === "past_due") return { state: "past_due" };
