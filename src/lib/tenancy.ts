@@ -27,6 +27,9 @@ export function isPlatformAdmin(email: string) {
 export const getWorkspace = cache(async () => {
   const user = await getCurrentUser();
   if (!user) return null;
+  const admin = isPlatformAdmin(user.email);
+  // Platform admins run their own workspaces free, on Enterprise, without a trial (no-op once applied).
+  if (admin) await compOwnedWorkspaces(user.id);
 
   const rows = await db
     .select({ org: schema.organizations, role: schema.memberships.role })

@@ -74,6 +74,8 @@ export const organizations = sqliteTable("organizations", {
   cardLast4: text("card_last4"),
   cardExpMonth: integer("card_exp_month"),
   cardExpYear: integer("card_exp_year"),
+  /** Set by a platform admin (or automatically for admins' own workspaces): full access, no trial or billing. */
+  compedAt: integer("comped_at", { mode: "timestamp" }),
   createdAt: createdAt(),
 });
 
