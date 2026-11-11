@@ -30,6 +30,8 @@ export const users = sqliteTable("users", {
   passwordHash: text("password_hash").notNull(),
   /** Sessions issued before this moment are rejected (set on password change/reset). */
   passwordChangedAt: integer("password_changed_at", { mode: "timestamp" }),
+  /** Null until the user proves the address (emailed code, invite link, reset link or SSO). */
+  emailVerifiedAt: integer("email_verified_at", { mode: "timestamp" }),
   createdAt: createdAt(),
 });
 
@@ -1436,6 +1438,34 @@ export const passwordResets = sqliteTable(
     createdAt: createdAt(),
   },
   (t) => [index("password_resets_user").on(t.userId)],
+);
+
+/** One-time sign-up codes. Only the HMAC of the code is stored. */
+export const emailVerifications = sqliteTable(
+  "email_verifications",
+  {
+    id: id(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    codeHash: text("code_hash").notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+    usedAt: integer("used_at", { mode: "timestamp" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("email_verifications_user").on(t.userId)],
+);
+
+/** Sliding-window counters for sign-up, log-in and code requests (shared across serverless instances). */
+export const authThrottle = sqliteTable(
+  "auth_throttle",
+  {
+    id: id(),
+    key: text("key").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("auth_throttle_key_created").on(t.key, t.createdAt)],
 );
 
 // --- Attendance regularisation ---

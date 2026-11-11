@@ -8,17 +8,23 @@ import { z } from "zod";
 import { db, schema } from "@/db";
 import { LoginSchema, SignupSchema, type FormState } from "@/lib/definitions";
 import { COUNTRIES, countryFromPhone, isValidPhone, normalizePhone } from "@/lib/countries";
-import { sendEmail } from "@/lib/email";
-import { createOrganization } from "@/lib/org";
-import { appOrigin } from "@/lib/url";
+import {
+  LOGIN_MAX_FAILS_PER_EMAIL,
+  LOGIN_MAX_FAILS_PER_IP,
+  LOGIN_WINDOW_MS,
+  SIGNUP_MAX_PER_IP_HOUR,
+  isDisposableEmail,
+} from "@/lib/email-verification";
 import { createSession, deleteSession } from "@/lib/session";
 import { syncSeats } from "@/lib/stripe";
-import { ORG_COOKIE } from "@/lib/tenancy";
+import { ORG_COOKIE, isPlatformAdmin } from "@/lib/tenancy";
+import { clearHits, clientIp, consume, recentHits, recordHit } from "@/lib/throttle";
+import { issueCode } from "@/lib/verification";
 
 /** Only allow same-site relative redirects. */
 function safeNext(value: FormDataEntryValue | null) {
   const s = typeof value === "string" ? value : "";
-  return s.startsWith("/") && !s.startsWith("//") ? s : "/app";
+  return s.startsWith("/") && !s.startsWith("//") ? s : null;
 }
 
 async function setActiveOrg(orgId: number) {
@@ -44,8 +50,11 @@ export async function signup(_: FormState, formData: FormData): Promise<FormStat
     password: String(formData.get("password") ?? ""),
   };
   const inviteToken = String(formData.get("invite") ?? "");
-  const parsed = SignupSchema.safeParse(raw);
   const values = { name: raw.name, email: raw.email, company: raw.company ?? "", country: raw.country, phone: raw.phone ?? "" };
+  // Hidden field people never see; bots that fill every input get a vague error.
+  if (String(formData.get("website") ?? "")) return { message: "We couldn't create your account. Please try again.", values };
+
+  const parsed = SignupSchema.safeParse(raw);
   if (!parsed.success) {
     return { errors: z.flattenError(parsed.error).fieldErrors, values };
   }
@@ -63,44 +72,51 @@ export async function signup(_: FormState, formData: FormData): Promise<FormStat
   if (invite && invite.email.toLowerCase() !== email) {
     return { errors: { email: [`This invite is for ${invite.email}.`] }, values };
   }
+  if (!invite) {
+    if (isDisposableEmail(email)) return { errors: { email: ["Please use your work or personal email, not a temporary inbox."] }, values };
+    // Invites are exempt: a whole office may join from one IP.
+    if (!(await consume(`signup:ip:${await clientIp()}`, SIGNUP_MAX_PER_IP_HOUR, 60 * 60 * 1000))) {
+      return { message: "Too many sign-ups from your network. Please try again in an hour.", values };
+    }
+  }
 
-  const existing = await db
-    .select({ id: schema.users.id })
+  const [existing] = await db
+    .select({ id: schema.users.id, verified: schema.users.emailVerifiedAt })
     .from(schema.users)
     .where(eq(schema.users.email, email))
     .limit(1);
-  if (existing.length) {
+  if (existing?.verified) {
     return { errors: { email: ["An account with this email already exists."] }, values };
   }
 
+  // The invite link was emailed to this address, so following it proves ownership.
+  const emailVerifiedAt = invite ? new Date() : null;
   const passwordHash = await bcrypt.hash(password, 12);
-  const [user] = await db
-    .insert(schema.users)
-    .values({ name, email, company, phone, passwordHash })
-    .returning({ id: schema.users.id });
-
-  let orgId: number;
-  if (invite) {
-    await db.insert(schema.memberships).values({ orgId: invite.orgId, userId: user.id, role: invite.role });
-    await db.update(schema.invites).set({ acceptedAt: new Date() }).where(eq(schema.invites.id, invite.id));
-    orgId = invite.orgId;
-    await syncSeats(orgId);
+  let userId: number;
+  if (existing) {
+    // Nobody has proved this address yet, so a fresh sign-up replaces the pending one.
+    await db.update(schema.users).set({ name, company, phone, passwordHash, emailVerifiedAt }).where(eq(schema.users.id, existing.id));
+    userId = existing.id;
   } else {
-    orgId = await createOrganization(user.id, company || `${name.split(" ")[0]}'s workspace`, { country, phone });
+    [{ id: userId }] = await db
+      .insert(schema.users)
+      .values({ name, email, company, phone, passwordHash, emailVerifiedAt })
+      .returning({ id: schema.users.id });
   }
 
-  if (!invite) {
-    await sendEmail({
-      to: email,
-      subject: "Welcome to saasmodels.tech",
-      paragraphs: [`Hi ${name.split(" ")[0]},`, "Your workspace is ready and your 14-day trial has started. Set up your company and invite your team whenever you're ready."],
-      action: { label: "Open your workspace", url: `${await appOrigin()}/app` },
-    });
+  if (invite) {
+    await db.insert(schema.memberships).values({ orgId: invite.orgId, userId, role: invite.role });
+    await db.update(schema.invites).set({ acceptedAt: new Date() }).where(eq(schema.invites.id, invite.id));
+    await syncSeats(invite.orgId);
+    await createSession(userId);
+    await setActiveOrg(invite.orgId);
+    redirect("/app");
   }
 
-  await createSession(user.id);
-  await setActiveOrg(orgId);
-  redirect("/app");
+  // The workspace is created once the emailed code is entered (completeVerification).
+  await issueCode({ id: userId, email, name });
+  await createSession(userId);
+  redirect("/verify-email");
 }
 
 export async function login(_: FormState, formData: FormData): Promise<FormState> {
@@ -114,6 +130,15 @@ export async function login(_: FormState, formData: FormData): Promise<FormState
     return { errors: z.flattenError(parsed.error).fieldErrors, values };
   }
 
+  const emailKey = `login:email:${parsed.data.email}`;
+  const ipKey = `login:ip:${await clientIp()}`;
+  if (
+    (await recentHits(emailKey, LOGIN_WINDOW_MS)) >= LOGIN_MAX_FAILS_PER_EMAIL ||
+    (await recentHits(ipKey, LOGIN_WINDOW_MS)) >= LOGIN_MAX_FAILS_PER_IP
+  ) {
+    return { message: "Too many failed attempts. Wait 15 minutes or reset your password.", values };
+  }
+
   const [user] = await db
     .select()
     .from(schema.users)
@@ -123,11 +148,18 @@ export async function login(_: FormState, formData: FormData): Promise<FormState
   // Same message for unknown email and wrong password to avoid account enumeration.
   const valid = user && (await bcrypt.compare(parsed.data.password, user.passwordHash));
   if (!valid) {
+    await recordHit(emailKey);
+    await recordHit(ipKey);
     return { message: "Email or password is incorrect.", values };
   }
+  await clearHits(emailKey);
 
   await createSession(user.id);
-  redirect(safeNext(formData.get("next")));
+  if (!user.emailVerifiedAt) {
+    await issueCode(user);
+    redirect("/verify-email");
+  }
+  redirect(safeNext(formData.get("next")) ?? (isPlatformAdmin(user.email) ? "/admin" : "/app"));
 }
 
 export async function logout() {

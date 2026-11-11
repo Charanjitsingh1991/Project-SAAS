@@ -1,7 +1,7 @@
 "use server";
 
 import bcrypt from "bcryptjs";
-import { and, eq, gt, isNull, ne } from "drizzle-orm";
+import { and, eq, gt, isNull, ne, sql } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { db, schema } from "@/db";
@@ -97,9 +97,11 @@ export async function resetPassword(_: FormState, formData: FormData): Promise<F
   if (!claimed.length) return { message: "This reset link is invalid or has expired. Request a new one." };
 
   const passwordHash = await bcrypt.hash(parsed.data.password, BCRYPT_COST);
+  const now = new Date();
   const [user] = await db
     .update(schema.users)
-    .set({ passwordHash, passwordChangedAt: new Date() })
+    // The reset link reached the inbox, which also proves the address.
+    .set({ passwordHash, passwordChangedAt: now, emailVerifiedAt: sql`coalesce(${schema.users.emailVerifiedAt}, ${Math.floor(now.getTime() / 1000)})` })
     .where(eq(schema.users.id, row.userId))
     .returning({ id: schema.users.id, name: schema.users.name, email: schema.users.email });
   if (!user) return { message: "This reset link is invalid or has expired. Request a new one." };

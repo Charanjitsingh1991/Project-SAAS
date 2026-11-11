@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { cache } from "react";
 import { db, schema } from "@/db";
 import type { Role } from "@/db/schema";
-import { getCurrentUser } from "./dal";
+import { getCurrentUser, redirectToAuth } from "./dal";
 import { packOf } from "./countries";
 import { activeModules, effectivePlan, planHas, type Feature } from "./plans";
 import { canManage, roleCanUse, type ModuleKey } from "./roles";
@@ -78,7 +78,7 @@ export function packFor(ws: ActiveWorkspace) {
  */
 export async function requireWorkspace(opts: { module?: ModuleKey; manage?: boolean; allowLocked?: boolean; feature?: Feature } = {}) {
   const ws = await getWorkspace();
-  if (!ws) redirect("/login");
+  if (!ws) return redirectToAuth();
   if (!ws.org || !ws.role || !ws.access) redirect("/app/setup");
   const active = ws as ActiveWorkspace;
 
@@ -91,7 +91,7 @@ export async function requireWorkspace(opts: { module?: ModuleKey; manage?: bool
 
 export async function requirePlatformAdmin() {
   const ws = await getWorkspace();
-  if (!ws) redirect("/login");
+  if (!ws) return redirectToAuth();
   if (!ws.isPlatformAdmin) redirect("/app");
   return ws;
 }

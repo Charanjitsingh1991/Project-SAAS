@@ -3,13 +3,14 @@ import { redirect } from "next/navigation";
 import { createWorkspace } from "@/app/app/actions";
 import { ActionForm, Input, Select, SubmitButton } from "@/components/app/forms";
 import { COUNTRY_LIST } from "@/lib/countries";
+import { redirectToAuth } from "@/lib/dal";
 import { getWorkspace } from "@/lib/tenancy";
 
 export const metadata: Metadata = { title: "Create workspace" };
 
 export default async function SetupPage() {
   const ws = await getWorkspace();
-  if (!ws) redirect("/login");
+  if (!ws) return redirectToAuth();
   if (ws.org) redirect("/app");
 
   return (

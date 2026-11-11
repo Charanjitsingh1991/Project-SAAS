@@ -1,4 +1,6 @@
 import { retryDueDeliveries } from "@/lib/integrations/deliver";
+import { pruneThrottle } from "@/lib/throttle";
+import { pruneUnverified } from "@/lib/verification";
 
 /**
  * Retries webhook/chat deliveries whose backoff has elapsed (1m, 5m, 30m, 2h, 12h).
@@ -11,5 +13,8 @@ export async function GET(req: Request) {
     return new Response("Unauthorized", { status: 401 });
   }
   const attempted = await retryDueDeliveries();
-  return Response.json({ ok: true, attempted });
+  // Daily housekeeping rides on this job: old throttle rows, stale codes, abandoned unverified sign-ups.
+  await pruneThrottle();
+  const prunedSignups = await pruneUnverified();
+  return Response.json({ ok: true, attempted, prunedSignups });
 }

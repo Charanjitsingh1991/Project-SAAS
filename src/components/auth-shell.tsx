@@ -2,7 +2,7 @@ import { Logo } from "./logo";
 import { SpinBadge } from "./ui/spin-badge";
 
 /** Split-screen shell shared by /login and /signup. */
-export function AuthShell({ title, subtitle, children }: { title: React.ReactNode; subtitle: string; children: React.ReactNode }) {
+export function AuthShell({ title, subtitle, children }: { title: React.ReactNode; subtitle: React.ReactNode; children: React.ReactNode }) {
   return (
     <div className="grid min-h-dvh lg:grid-cols-2">
       <div className="flex flex-col px-6 py-8 md:px-12">

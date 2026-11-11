@@ -6,7 +6,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { db, schema } from "@/db";
-import { getCurrentUser } from "@/lib/dal";
+import { getCurrentUser, redirectToAuth } from "@/lib/dal";
 import type { FormState } from "@/lib/definitions";
 import { createOrganization } from "@/lib/org";
 import { effectivePlan } from "@/lib/plans";
@@ -26,7 +26,7 @@ async function setActiveOrg(orgId: number) {
 
 export async function createWorkspace(_: FormState, fd: FormData): Promise<FormState> {
   const user = await getCurrentUser();
-  if (!user) redirect("/login");
+  if (!user) return redirectToAuth();
   const parsed = z
     .object({ name: z.string().trim().min(2, "Give your workspace a name.").max(80), country: z.enum(["IN", "AE"], "Choose a country.") })
     .safeParse({ name: fd.get("name"), country: fd.get("country") ?? "IN" });
@@ -48,7 +48,7 @@ export async function createWorkspace(_: FormState, fd: FormData): Promise<FormS
 
 export async function switchWorkspace(fd: FormData) {
   const user = await getCurrentUser();
-  if (!user) redirect("/login");
+  if (!user) return redirectToAuth();
   const orgId = Number(fd.get("orgId"));
   const [m] = await db
     .select({ id: schema.memberships.id })
