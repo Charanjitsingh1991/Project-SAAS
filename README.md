@@ -24,7 +24,9 @@ npm run dev                    # http://localhost:3000
 ## How it works
 
 ### Sign-up → workspace → trial
-1. `/signup` creates the user **and** a company workspace (they become its **Owner**).
+1. `/signup` creates the user and emails a 6-digit code (`/verify-email`). Entering it creates the company workspace (they become its **Owner**). Until then the account can't open `/app` or `/admin`. Invite links, password-reset links and Google/Microsoft sign-in count as verified.
+   - Abuse limits: 5 sign-ups per IP per hour, log-in paused after 8 failed attempts per email (30 per IP) in 15 minutes, a hidden honeypot field, and common throwaway-email domains are refused. Codes expire after 10 minutes and allow 5 tries.
+   - The nightly `/api/cron/webhooks` job deletes unverified sign-ups older than 7 days.
 2. The 14-day trial starts immediately, with no card. Day 1 is the sign-up date in `APP_TIMEZONE`.
 3. From **00:00 on day 14**, everyone in the workspace sees a red banner: add a payment method, or services will be disabled.
 4. At **00:00 on day 15**, an unpaid workspace is **deactivated**. Every module redirects to `/app/billing`, but data is kept.
