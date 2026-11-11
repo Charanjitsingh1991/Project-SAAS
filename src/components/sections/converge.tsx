@@ -55,8 +55,8 @@ export function Converge() {
               <div className="flex w-[340px] flex-col items-center gap-4 rounded-[28px] bg-ink p-7 text-paper shadow-[0_40px_80px_-30px_rgba(20,20,18,.6)]">
                 <div className="flex items-center gap-2">
                   <LogoMark className="size-9 text-paper [&_.fill-paper]:fill-ink" />
-                  <span className="font-display text-3xl font-bold">
-                    saas<span className="text-signal">.</span>tech
+                  <span className="font-display text-[26px] font-bold tracking-tight whitespace-nowrap">
+                    saasmodels<span className="text-signal">.</span>tech
                   </span>
                 </div>
                 <div className="grid w-full grid-cols-4 gap-1.5">
