@@ -33,6 +33,10 @@ export function AuthForm({
     >
       {invite && <input type="hidden" name="invite" value={invite.token} />}
       {next && <input type="hidden" name="next" value={next} />}
+      {isSignup && (
+        // Honeypot: hidden from people and screen readers; bots that fill it are rejected.
+        <input type="text" name="website" tabIndex={-1} autoComplete="off" aria-hidden className="absolute -left-[9999px] h-px w-px opacity-0" />
+      )}
       {invite && (
         <p className="rounded-xl bg-lime/60 px-4 py-3 text-sm">
           You&apos;re joining <b>{invite.orgName}</b>. Create your account with <b>{invite.email}</b>.

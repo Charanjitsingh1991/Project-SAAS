@@ -32,7 +32,15 @@ async function resolveUser(provider: OAuthProvider, p: VerifiedProfile) {
   if (!userId) {
     // Random password: password login stays impossible until the user runs "Forgot password".
     const passwordHash = await bcrypt.hash(randomToken(32), 12);
-    [{ id: userId }] = await db.insert(schema.users).values({ name: p.name, email: p.email, passwordHash }).returning({ id: schema.users.id });
+    [{ id: userId }] = await db
+      .insert(schema.users)
+      .values({ name: p.name, email: p.email, passwordHash, emailVerifiedAt: new Date() })
+      .returning({ id: schema.users.id });
+  } else {
+    await db
+      .update(schema.users)
+      .set({ emailVerifiedAt: new Date() })
+      .where(and(eq(schema.users.id, userId), isNull(schema.users.emailVerifiedAt)));
   }
   await db.insert(schema.oauthAccounts).values({ userId, provider, subject: p.subject, email: p.email }).onConflictDoNothing();
   return userId;
