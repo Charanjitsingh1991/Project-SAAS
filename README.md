@@ -73,8 +73,8 @@ Only for emails listed in `ADMIN_EMAILS`:
 - **Enquiries:** contact-form messages, which you can mark *new*, *contacted* or *closed*.
 
 ## Connecting Stripe
-1. In the Stripe dashboard, create two products, **Starter** and **Growth**. Give each a **monthly** and a **yearly** recurring price, billed **per unit** (one unit = one seat).
-2. Set `STRIPE_SECRET_KEY` and the four `STRIPE_PRICE_*` IDs. The display prices are in `PLAN_PRICES` in `src/lib/stripe.ts`.
+1. Set `STRIPE_SECRET_KEY`. On the first checkout the app creates the **Starter** and **Growth** products with monthly and yearly per-seat USD prices (lookup keys `saasmodels_<plan>_<month|year>`), using the display prices in `PLAN_PRICES` in `src/lib/stripe.ts`. To use prices you made yourself, set the four `STRIPE_PRICE_*` IDs instead.
+2. To change a price later, create a new price in Stripe and move the lookup key to it (tick "Transfer lookup key"); existing subscribers keep their old price.
 3. Add a webhook endpoint `https://saasmodels.tech/api/stripe/webhook` with these events:
    - `checkout.session.completed`
    - `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`

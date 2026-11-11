@@ -6,6 +6,7 @@ import { Faq } from "@/components/sections/faq";
 import { Footer } from "@/components/sections/footer";
 import { Hero } from "@/components/sections/hero";
 import { Platform } from "@/components/sections/platform";
+import { configuredProviders } from "@/lib/oauth-server";
 import { Pricing } from "@/components/sections/pricing";
 import { Stats } from "@/components/sections/stats";
 import { Suite } from "@/components/sections/suite";
@@ -21,7 +22,7 @@ export default function Home() {
         <Ticker />
         <Converge />
         <Suite />
-        <Platform />
+        <Platform ssoProviders={configuredProviders()} />
         <Stats />
         <Testimonials />
         <Pricing />

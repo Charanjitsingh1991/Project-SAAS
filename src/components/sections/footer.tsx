@@ -18,7 +18,7 @@ export function Footer() {
         <div className="md:col-span-5">
           <Logo />
           <p className="mt-4 max-w-xs text-ink-soft">The operating system for organizations that are done juggling tools.</p>
-          <p className="mt-6 font-mono text-xs text-ink-mute">hello@saasmodels.tech</p>
+          <p className="mt-6 font-mono text-xs text-ink-mute">info@saasmodels.tech</p>
         </div>
         {COLS.map((c) => (
           <div key={c.h} className="md:col-span-2">

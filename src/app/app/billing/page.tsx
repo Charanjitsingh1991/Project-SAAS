@@ -19,10 +19,10 @@ const NOTICES: Record<string, { tone: "ok" | "warn"; text: string }> = {
   "checkout=success": { tone: "ok", text: "Payment method added — thank you! Your subscription is active." },
   "checkout=pending": { tone: "warn", text: "Payment received. Your subscription will show here within a minute." },
   "checkout=cancelled": { tone: "warn", text: "Checkout was cancelled. No charge was made." },
-  "error=not_configured": { tone: "warn", text: "Payments aren't connected yet. Add your Stripe keys and price IDs (see README)." },
+  "error=not_configured": { tone: "warn", text: "Payments aren't connected yet. Add your Stripe secret key (see README)." },
   "error=already_subscribed": { tone: "warn", text: "You already have a subscription — use “Manage billing” to change plan or card." },
   "error=no_customer": { tone: "warn", text: "Add a payment method first by choosing a plan below." },
-  "error=stripe": { tone: "warn", text: "Stripe returned an error. Check your STRIPE_SECRET_KEY and price IDs, then try again." },
+  "error=stripe": { tone: "warn", text: "Stripe returned an error. Check your STRIPE_SECRET_KEY, then try again." },
   "error=mismatch": { tone: "warn", text: "That checkout session belongs to a different workspace." },
 };
 
@@ -171,7 +171,7 @@ export default async function BillingPage(props: PageProps<"/app/billing">) {
           <h2 className="mt-10 mb-4 font-display text-xl font-semibold">Choose a plan</h2>
           {!configured && (
             <p className="mb-4 rounded-xl bg-butter px-4 py-3 text-sm">
-              <b>Stripe isn&apos;t connected yet.</b> Set <code className="font-mono">STRIPE_SECRET_KEY</code> and the four <code className="font-mono">STRIPE_PRICE_*</code> IDs to enable checkout.
+              <b>Stripe isn&apos;t connected yet.</b> Set <code className="font-mono">STRIPE_SECRET_KEY</code> to enable checkout.
             </p>
           )}
           <div className="grid gap-5 md:grid-cols-2">

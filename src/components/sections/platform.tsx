@@ -133,12 +133,27 @@ function Copilot() {
 
 const FEATURES = [
   { icon: Workflow, title: "Built-in automations", body: "Won deal → invoice and project. Approved leave → attendance → payroll. PO received → stock and bill. Switch each one on or off.", c: "bg-butter" },
-  { icon: Lock, title: "Secure by design", body: "Role-based access, Google and Microsoft sign-in, an audit log on Enterprise, and every record scoped to your workspace.", c: "bg-sky" },
+  { icon: Lock, title: "Secure by design", body: "Role-based access, an audit log on Enterprise, and every record scoped to your workspace.", c: "bg-sky" },
   { icon: Plug, title: "Connects to your tools", body: "Slack, Teams, Google Chat, Google and Outlook calendars, Razorpay, Zapier, Make, n8n and a REST API.", c: "bg-peach" },
   { icon: Smartphone, title: "Works on your phone", body: "Check in, apply for leave, approve your team and look up stock from any phone browser.", c: "bg-mint" },
 ];
 
-export function Platform() {
+const SSO_NAMES: Record<string, string> = { google: "Google", microsoft: "Microsoft" };
+
+/** Only advertise single sign-on for providers whose keys are actually set. */
+function featuresFor(ssoProviders: string[]) {
+  const names = ssoProviders.map((p) => SSO_NAMES[p]).filter(Boolean);
+  if (!names.length) return FEATURES;
+  const sso = `${names.join(" and ")} sign-in`;
+  return FEATURES.map((f) =>
+    f.title === "Secure by design"
+      ? { ...f, body: `Role-based access, ${sso}, an audit log on Enterprise, and every record scoped to your workspace.` }
+      : f,
+  );
+}
+
+export function Platform({ ssoProviders = [] }: { ssoProviders?: string[] }) {
+  const features = featuresFor(ssoProviders);
   return (
     <section id="copilot" className="mx-auto max-w-6xl px-5 py-28">
       <SectionLabel index="03">The platform</SectionLabel>
@@ -153,7 +168,7 @@ export function Platform() {
         <Reveal className="md:col-span-7 md:row-span-2">
           <Copilot />
         </Reveal>
-        {FEATURES.slice(0, 2).map((f, i) => (
+        {features.slice(0, 2).map((f, i) => (
           <Reveal key={f.title} delay={i * 0.08} className="md:col-span-5">
             <motion.div
               whileHover="hover"
@@ -172,7 +187,7 @@ export function Platform() {
         ))}
       </div>
       <div className="mt-5 grid gap-5 md:grid-cols-2">
-        {FEATURES.slice(2).map((f, i) => (
+        {features.slice(2).map((f, i) => (
           <Reveal key={f.title} delay={i * 0.08}>
             <motion.div whileHover="hover" className={`flex h-full items-start gap-5 rounded-[28px] border border-ink/10 p-6 ${f.c}`}>
               <motion.span
