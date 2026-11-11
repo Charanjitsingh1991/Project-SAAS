@@ -19,19 +19,78 @@ export const PLAN_PRICES: Record<Plan, Record<Interval, number>> = {
   growth: { month: 24, year: 19 },
 };
 
+const PLAN_NAMES: Record<Plan, string> = { starter: "Starter", growth: "Growth" };
+
+/** An explicit STRIPE_PRICE_* override, if one is set. */
 export function priceId(plan: Plan, interval: Interval) {
   return process.env[PRICE_ENV[plan][interval]] || null;
 }
 
-export function stripeConfigured() {
-  return Boolean(stripe && priceId("growth", "month"));
+export function priceLookupKey(plan: Plan, interval: Interval) {
+  return `saasmodels_${plan}_${interval}`;
 }
 
-function planForPrice(id: string | undefined): { plan: Plan; interval: Interval } | null {
-  if (!id) return null;
+/** Stripe bills the yearly price once a year, so it is the per-month display price × 12. */
+export function priceAmountCents(plan: Plan, interval: Interval) {
+  return PLAN_PRICES[plan][interval] * 100 * (interval === "year" ? 12 : 1);
+}
+
+export function stripeConfigured() {
+  return Boolean(stripe);
+}
+
+const resolved = new Map<string, string>();
+
+/**
+ * Price for a plan: the STRIPE_PRICE_* override if set, otherwise the price carrying our lookup key,
+ * created (with its product) on first use so no price IDs need to be copied into the environment.
+ */
+export async function resolvePriceId(plan: Plan, interval: Interval): Promise<string | null> {
+  const override = priceId(plan, interval);
+  if (override) return override;
+  if (!stripe) return null;
+  const lookupKey = priceLookupKey(plan, interval);
+  const cached = resolved.get(lookupKey);
+  if (cached) return cached;
+
+  const find = async () => (await stripe!.prices.list({ lookup_keys: [lookupKey], active: true, limit: 1 })).data[0]?.id;
+  let id = await find();
+  if (!id) {
+    const productId = `saasmodels_${plan}`;
+    try {
+      await stripe.products.retrieve(productId);
+    } catch {
+      await stripe.products
+        .create({ id: productId, name: `saasmodels.tech ${PLAN_NAMES[plan]}`, metadata: { plan } })
+        .catch(() => undefined); // created concurrently
+    }
+    try {
+      id = (
+        await stripe.prices.create({
+          product: productId,
+          currency: "usd",
+          unit_amount: priceAmountCents(plan, interval),
+          recurring: { interval, usage_type: "licensed" },
+          lookup_key: lookupKey,
+          nickname: `${PLAN_NAMES[plan]} · ${interval === "year" ? "yearly" : "monthly"} · per user`,
+          metadata: { plan, interval },
+        })
+      ).id;
+    } catch (e) {
+      // Lookup keys are unique: another request may have created it first.
+      id = await find();
+      if (!id) throw e;
+    }
+  }
+  resolved.set(lookupKey, id);
+  return id;
+}
+
+function planForPrice(price: Pick<Stripe.Price, "id" | "lookup_key"> | undefined): { plan: Plan; interval: Interval } | null {
+  if (!price) return null;
   for (const plan of ["starter", "growth"] as Plan[]) {
     for (const interval of ["month", "year"] as Interval[]) {
-      if (priceId(plan, interval) === id) return { plan, interval };
+      if (priceId(plan, interval) === price.id || price.lookup_key === priceLookupKey(plan, interval)) return { plan, interval };
     }
   }
   return null;
@@ -65,7 +124,7 @@ export async function syncSubscription(sub: Stripe.Subscription) {
   if (!org) return null;
 
   const item = sub.items?.data?.[0];
-  const mapped = planForPrice(item?.price?.id);
+  const mapped = planForPrice(item?.price);
   const card = await cardFrom(sub.default_payment_method as string | Stripe.PaymentMethod | null);
 
   await db

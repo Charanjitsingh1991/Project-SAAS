@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { db, schema } from "@/db";
-import { priceId, stripe } from "@/lib/stripe";
+import { resolvePriceId, stripe } from "@/lib/stripe";
 import { requireWorkspace } from "@/lib/tenancy";
 import { appOrigin } from "@/lib/url";
 
@@ -12,8 +12,7 @@ export async function startCheckout(fd: FormData) {
   const ws = await requireWorkspace({ manage: true, allowLocked: true });
   const plan = z.enum(["starter", "growth"]).parse(fd.get("plan"));
   const interval = z.enum(["month", "year"]).parse(fd.get("interval"));
-  const price = priceId(plan, interval);
-  if (!stripe || !price) redirect("/app/billing?error=not_configured");
+  if (!stripe) redirect("/app/billing?error=not_configured");
 
   const origin = await appOrigin();
   const org = ws.org;
@@ -32,6 +31,8 @@ export async function startCheckout(fd: FormData) {
 
   let url: string;
   try {
+    const price = await resolvePriceId(plan, interval);
+    if (!price) throw new Error("No Stripe price for this plan");
     let customerId = org.stripeCustomerId;
     if (!customerId) {
       const customer = await stripe.customers.create({

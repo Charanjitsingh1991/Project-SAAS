@@ -5,6 +5,7 @@ import { CalendarDays, Code2, CreditCard, KeyRound, MessageSquare, Plug, Sparkle
 import { Badge, Card, PageHeader } from "@/components/app/ui";
 import { db, schema } from "@/db";
 import { canManage } from "@/lib/roles";
+import { configuredProviders } from "@/lib/oauth-server";
 import { canUseModule, hasFeature, requireWorkspace } from "@/lib/tenancy";
 
 export const metadata: Metadata = { title: "Integrations" };
@@ -118,9 +119,12 @@ export default async function IntegrationsPage() {
       </div>
       <Card className="mt-6" title="Also built in">
         <ul className="grid gap-2 text-sm text-ink-soft md:grid-cols-2">
-          <li className="flex gap-2">
-            <KeyRound className="mt-0.5 size-4 shrink-0" /> Sign in with Google or Microsoft (set up once by the platform owner).
-          </li>
+          {configuredProviders().length > 0 && (
+            <li className="flex gap-2">
+              <KeyRound className="mt-0.5 size-4 shrink-0" /> Sign in with{" "}
+              {configuredProviders().map((p) => (p === "google" ? "Google" : "Microsoft")).join(" or ")}.
+            </li>
+          )}
           <li className="flex gap-2">
             <Plug className="mt-0.5 size-4 shrink-0" /> CSV import and export for people, contacts, companies and products.
           </li>

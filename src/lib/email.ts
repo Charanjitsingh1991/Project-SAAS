@@ -53,7 +53,7 @@ export async function sendEmail(msg: EmailMessage): Promise<EmailResult> {
         subject: msg.subject,
         html,
         text,
-        ...(msg.replyTo ? { reply_to: msg.replyTo } : {}),
+        ...(msg.replyTo || process.env.EMAIL_REPLY_TO ? { reply_to: msg.replyTo || process.env.EMAIL_REPLY_TO } : {}),
       }),
       signal: AbortSignal.timeout(10_000),
     });
